@@ -386,3 +386,305 @@ def run_rq2(seasons: list[int], seed: int = 42, n_boot: int = 500, n_perm: int =
         mlflow.log_artifacts(str(out), "rq2")
         _write_json(out / "results.json", res)
     return res
+
+
+# --- RQ3 -------------------------------------------------------------------------------------
+
+
+def pit_loss_per_stop() -> pd.DataFrame:
+    """Empirical pit loss per green-flag stop: in-lap + out-lap - 2 x the driver's median
+    clean lap in that race. Spark in, pandas out (one row per stop)."""
+    from pyspark.sql import Window
+
+    from pitwall.gold.lap_facts import clean_lap_flag
+
+    laps = _read("gold", "fact_lap").filter(F.col("session_type") == "R")
+    key = ["season", "event_round", "driver_id"]
+    median = (
+        laps.filter(clean_lap_flag())
+        .groupBy(*key)
+        .agg(F.percentile_approx("lap_time_s", 0.5).alias("_median_s"))
+    )
+    nxt = Window.partitionBy(*key).orderBy("lap_number")
+    races = (
+        _read("gold", "dim_session")
+        .filter(F.col("session_type") == "R")
+        .select("season", F.col("round").alias("event_round"), "circuit_id")
+    )
+    stops = (
+        laps.withColumn("_out_time", F.lead("lap_time_s").over(nxt))
+        .withColumn("_out_neutral", F.lead("is_neutralized").over(nxt))
+        .filter(F.col("is_pit_in_lap") & ~F.col("is_neutralized") & ~F.col("_out_neutral"))
+        .join(median, key)
+        .join(races, ["season", "event_round"])
+        .select(
+            "season",
+            "circuit_id",
+            (F.col("lap_time_s") + F.col("_out_time") - 2 * F.col("_median_s")).alias("pit_loss_s"),
+        )
+        .filter(F.col("pit_loss_s").isNotNull())
+    )
+    return stops.toPandas()
+
+
+def sc_events_per_race() -> pd.DataFrame:
+    """SC and VSC deployments per race with lap-level data, and the race distance."""
+    control = _read("silver", "race_control").filter(F.col("session_type") == "R")
+    covered = control.select("season", F.col("event_round").alias("round")).distinct()
+    counts = (
+        control.filter(F.col("status").isin("4", "6"))
+        .groupBy("season", F.col("event_round").alias("round"))
+        .agg(F.count(F.lit(1)).alias("n_sc_starts"))
+    )
+    races = _read("gold", "dim_session").filter(F.col("session_type") == "R")
+    return (
+        races.join(covered, ["season", "round"])
+        .join(counts, ["season", "round"], "left")
+        .select(
+            "season",
+            "circuit_id",
+            F.col("scheduled_laps").alias("laps"),
+            F.coalesce("n_sc_starts", F.lit(0)).alias("n_sc_starts"),
+        )
+        .toPandas()
+    )
+
+
+def load_race_inputs(season: int) -> list:
+    from pitwall.features.race_sim_params import build_race_inputs
+
+    sessions = _read("gold", "dim_session").filter(F.col("session_type") == "R").toPandas()
+    results = _read("gold", "fact_session_result").filter(F.col("season") == season).toPandas()
+    stints = (
+        _read("gold", "fact_stint")
+        .filter((F.col("season") == season) & (F.col("session_type") == "R"))
+        .toPandas()
+    )
+    posterior = _read("features", "rq1_degradation_posterior").toPandas()
+    return build_race_inputs(
+        season, sessions, results, stints, pit_loss_per_stop(), sc_events_per_race(), posterior
+    )
+
+
+def _plot_rq3(
+    reliability: pd.DataFrame, pit: np.ndarray, scaling: pd.DataFrame, gains: pd.Series, out: Path
+) -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 3.8))
+    axes[0].plot([0, 1], [0, 1], color="black", lw=0.7, ls="--")
+    axes[0].plot(reliability["mean_p"], reliability["observed"], "o-", color="#4c72b0")
+    axes[0].set_xlabel("Predicted P(top 10)")
+    axes[0].set_ylabel("Observed frequency")
+    axes[0].set_title("Reliability, backtest")
+    axes[1].hist(pit, bins=10, color="#55a868", edgecolor="white")
+    axes[1].axhline(len(pit) / 10, color="black", lw=0.7, ls="--")
+    axes[1].set_title("PIT of actual finishing position")
+    fig.tight_layout()
+    fig.savefig(out / "backtest_calibration.png", dpi=150)
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(5.5, 3.6))
+    ax.plot(scaling["parallelism"], scaling["speedup"], "o-", label="measured")
+    ax.plot(
+        scaling["parallelism"],
+        scaling["parallelism"] / scaling["parallelism"].iloc[0],
+        ls="--",
+        color="grey",
+        label="linear",
+    )
+    ax.set_xlabel("Concurrent Spark tasks (cores)")
+    ax.set_ylabel("Speed-up")
+    ax.set_xscale("log", base=2)
+    ax.set_yscale("log", base=2)
+    ax.legend(frameon=False)
+    ax.set_title("Simulation scaling")
+    fig.tight_layout()
+    fig.savefig(out / "scaling.png", dpi=150)
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(6, 3.6))
+    ax.hist(gains, bins=30, color="#c44e52", edgecolor="white")
+    ax.axvline(0, color="black", lw=0.7)
+    ax.set_xlabel("Expected points gained by the best alternative (held-out sims)")
+    ax.set_ylabel("driver-races")
+    fig.tight_layout()
+    fig.savefig(out / "decision_gains.png", dpi=150)
+    plt.close(fig)
+
+
+def _bootstrap_ci(values: np.ndarray, rng: np.random.Generator, n: int = 2000) -> list[float]:
+    means = [rng.choice(values, len(values)).mean() for _ in range(n)]
+    return [float(np.quantile(means, 0.025)), float(np.quantile(means, 0.975))]
+
+
+def run_rq3(
+    season: int = 2025,
+    backtest_sims: int = 10_000,
+    decision_sims: int = 800,
+    benchmark_sims: int = 200_000,
+    million_run: bool = True,
+    seed: int = 42,
+) -> dict[str, Any]:
+    """Research plan §RQ3: backtest, decision analysis, scaling benchmark."""
+    import time
+
+    import mlflow
+
+    from pitwall.simulation import distributed as dist
+    from pitwall.simulation import scoring
+    from pitwall.simulation.strategies import candidate_strategies
+    from pitwall.tracking import tracked_run
+
+    out = REPORTS / "rq3"
+    out.mkdir(parents=True, exist_ok=True)
+    spark = get_spark()
+    inputs = load_race_inputs(season)
+    races = [ri.setup for ri in inputs]
+    params = {
+        "season": season,
+        "n_races": len(races),
+        "backtest_sims": backtest_sims,
+        "decision_sims": decision_sims,
+    }
+    tables = {
+        t: table_path(layer, t)  # type: ignore[arg-type]
+        for layer, t in [
+            ("gold", "fact_lap"),
+            ("gold", "fact_stint"),
+            ("gold", "fact_session_result"),
+            ("features", "rq1_degradation_posterior"),
+        ]
+    }
+    rng = np.random.default_rng(seed)
+    with tracked_run("rq3-strategy", params, tables, seed) as run:
+        res: dict[str, Any] = {"mlflow_run_id": run.info.run_id, **params}
+
+        # Backtest: simulate every race with the strategies actually run, score vs grid.
+        counts = dist.simulate_on_spark(spark, races, backtest_sims, seed=seed)
+        per_race, pits, p10, hit10, pwin, won, grid1 = [], [], [], [], [], [], []
+        rps_model, rps_grid = [], []
+        for ri in inputs:
+            n = len(ri.driver_ids)
+            probs = dist.position_probs(counts, ri.setup.race_id, n)
+            grid_rank = np.argsort(np.argsort(np.where(ri.grid > 0, ri.grid, 99))) + 1
+            r_m = scoring.rps(probs, ri.actual_finish)
+            r_g = scoring.rps(scoring.degenerate(grid_rank, n), ri.actual_finish)
+            rps_model.append(r_m)
+            rps_grid.append(r_g)
+            pits.append(scoring.randomized_pit(probs, ri.actual_finish, rng))
+            p10.append(probs[:, :10].sum(axis=1))
+            hit10.append(ri.actual_finish <= 10)
+            pwin.append(probs[:, 0])
+            won.append(ri.actual_finish == 1)
+            grid1.append(grid_rank == 1)
+            per_race.append(
+                {
+                    "race_id": ri.setup.race_id,
+                    "circuit_id": ri.circuit_id,
+                    "rps_model": float(r_m.mean()),
+                    "rps_grid": float(r_g.mean()),
+                }
+            )
+        race_gain = np.array([r["rps_grid"] - r["rps_model"] for r in per_race])
+        rel = scoring.reliability(np.concatenate(p10), np.concatenate(hit10))
+        p_win, y_win = np.concatenate(pwin), np.concatenate(won).astype(float)
+        res["backtest"] = {
+            "rps_model": float(np.concatenate(rps_model).mean()),
+            "rps_grid_baseline": float(np.concatenate(rps_grid).mean()),
+            "rps_improvement_per_race_mean": float(race_gain.mean()),
+            "rps_improvement_ci": _bootstrap_ci(race_gain, rng),
+            "share_races_model_better": float((race_gain > 0).mean()),
+            "top10_ece": scoring.expected_calibration_error(rel),
+            "win_brier": float(np.mean((p_win - y_win) ** 2)),
+            "win_brier_grid": float(np.mean((np.concatenate(grid1) - y_win) ** 2)),
+            "per_race": per_race,
+        }
+        rel.to_csv(out / "top10_reliability.csv", index=False)
+
+        # Decision analysis: best alternative per driver, chosen on split 0, scored on split 1.
+        candidates = {
+            r.race_id: candidate_strategies(r.params.race_laps, min_stint=10, step=3) for r in races
+        }
+        targets = {r.race_id: list(range(len(r.cars))) for r in races}
+        sums = dist.evaluate_strategies_on_spark(
+            spark,
+            races,
+            targets,
+            candidates,
+            decision_sims,
+            batch_size=decision_sims // 2,
+            seed=seed + 1,
+        )
+        choose, score = dist.summarize(sums, split=0), dist.summarize(sums, split=1)
+        best = (
+            choose[~choose["is_actual"]]
+            .sort_values("expected_points", ascending=False)
+            .groupby(["race_id", "car_index"])
+            .head(1)[["race_id", "car_index", "strategy"]]
+        )
+        held = best.merge(score, on=["race_id", "car_index", "strategy"])
+        actual_pts = score[score["is_actual"]][["race_id", "car_index", "expected_points"]]
+        held = held.merge(
+            actual_pts.rename(columns={"expected_points": "actual_points"}),
+            on=["race_id", "car_index"],
+        )
+        names = {(ri.setup.race_id, i): d for ri in inputs for i, d in enumerate(ri.driver_ids)}
+        held["driver_id"] = [
+            names[(r, c)] for r, c in zip(held["race_id"], held["car_index"], strict=True)
+        ]
+        held.to_csv(out / "decision_analysis.csv", index=False, float_format="%.4f")
+        gain = held["points_gain_vs_actual"]
+        by_race = held.groupby("race_id")["points_gain_vs_actual"].mean().to_numpy()
+        res["decision"] = {
+            "n_candidates_per_race_mean": float(np.mean([len(c) for c in candidates.values()])),
+            "n_driver_races": len(held),
+            "mean_gain_per_driver_race": float(gain.mean()),
+            "mean_gain_ci": _bootstrap_ci(by_race, rng),
+            "share_gain_below_0_5_pts": float((gain < 0.5).mean()),
+            "share_gain_over_2_se": float((gain > 2 * held["points_gain_se"]).mean()),
+            "top_gains": held.nlargest(10, "points_gain_vs_actual")[
+                [
+                    "race_id",
+                    "driver_id",
+                    "strategy",
+                    "actual_points",
+                    "expected_points",
+                    "points_gain_vs_actual",
+                    "points_gain_se",
+                    "p_better_than_actual",
+                ]
+            ]
+            .round(3)
+            .to_dict("records"),
+        }
+
+        # Scaling: same work at increasing parallelism, then one 10^6-race run.
+        cores = spark.sparkContext.defaultParallelism
+        levels = [p for p in (1, 2, 4, 8, 16, 32) if p <= cores]
+        scaling = dist.scaling_benchmark(spark, races[0], benchmark_sims, levels)
+        scaling.to_csv(out / "scaling.csv", index=False)
+        res["scaling"] = scaling.to_dict("records")
+        if million_run:
+            start = time.perf_counter()
+            big = dist.simulate_on_spark(spark, [races[0]], 1_000_000, batch_size=5000, seed=seed)
+            elapsed = time.perf_counter() - start
+            probs = dist.position_probs(big, races[0].race_id, len(races[0].cars))
+            top = np.argsort(-probs[:, 0])[:3]
+            res["million_run"] = {
+                "race_id": races[0].race_id,
+                "n_sims": 1_000_000,
+                "seconds": elapsed,
+                "cores": cores,
+                "p_win_top3": {inputs[0].driver_ids[i]: float(probs[i, 0]) for i in top},
+            }
+        _plot_rq3(rel, np.concatenate(pits), scaling, gain, out)
+
+        mlflow.log_metrics({k: v for k, v in res["backtest"].items() if isinstance(v, float)})
+        mlflow.log_metrics({k: v for k, v in res["decision"].items() if isinstance(v, float)})
+        mlflow.log_artifacts(str(out), "rq3")
+        _write_json(out / "results.json", res)
+    return res

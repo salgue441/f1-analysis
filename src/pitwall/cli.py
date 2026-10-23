@@ -73,6 +73,13 @@ def main(argv: list[str] | None = None) -> None:
     rq2 = rq_sub.add_parser("rq2", help="Undercut: naive, IPW, DML, diagnostics, refutations")
     rq2.add_argument("--seasons", type=int, nargs="+", default=[2023, 2024, 2025])
     rq2.add_argument("--seed", type=int, default=42)
+    rq3 = rq_sub.add_parser("rq3", help="Strategy simulator: backtest, decisions, scaling")
+    rq3.add_argument("--season", type=int, default=2025)
+    rq3.add_argument("--backtest-sims", type=int, default=10_000)
+    rq3.add_argument("--decision-sims", type=int, default=800)
+    rq3.add_argument("--benchmark-sims", type=int, default=200_000)
+    rq3.add_argument("--no-million", action="store_true")
+    rq3.add_argument("--seed", type=int, default=42)
 
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -104,6 +111,16 @@ def main(argv: list[str] | None = None) -> None:
         elif args.target == "rq2":
             results = research.run_rq2(args.seasons, seed=args.seed)
             print(json.dumps(results["primary"], indent=2, default=str))
+        elif args.target == "rq3":
+            results = research.run_rq3(
+                args.season,
+                backtest_sims=args.backtest_sims,
+                decision_sims=args.decision_sims,
+                benchmark_sims=args.benchmark_sims,
+                million_run=not args.no_million,
+                seed=args.seed,
+            )
+            print(json.dumps({k: results[k] for k in ("backtest", "decision")}, default=str))
         return
     if args.command == "maintain":
         print(json.dumps(pipelines.maintain(), indent=2))

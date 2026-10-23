@@ -1,8 +1,8 @@
 """RQ3: Monte Carlo race strategy simulator (docs/research-plan.md#rq3).
 
-v0 simulates one car's total race time for a strategy, vectorized over simulations, with
-uncertain degradation and safety-car events. Later versions add the full field,
-overtaking and the RQ2 undercut effect, and distribute (race, strategy, batch) over Spark.
+Strategy types and a single-car race-time simulator (no traffic), kept as the simplest
+reference model. The full-field simulator with overtaking and safety cars is
+`simulation.field`; Spark distribution is `simulation.distributed`.
 """
 
 from __future__ import annotations
