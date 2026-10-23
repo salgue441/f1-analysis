@@ -1,0 +1,12 @@
+# AWS: S3 lakehouse, Spark on EMR Serverless (deploy/aws/, runbook in docs/cloud.md).
+# Set the bucket with PITWALL_LAKEHOUSE_ROOT=s3://<bucket>/lakehouse (Terraform outputs it).
+lakehouse_root: s3://pitwall-lakehouse-CHANGE-ME/lakehouse
+
+spark:
+  master: ""          # EMR Serverless sets it
+  delta_pip: false    # EMR ships Delta: /usr/share/aws/delta/lib (passed in run_job.sh)
+  conf:
+    # Executors are sized by EMR Serverless; keep shuffles proportional to the data.
+    spark.sql.shuffle.partitions: "64"
+    spark.sql.adaptive.enabled: "true"
+    spark.sql.adaptive.skewJoin.enabled: "true"

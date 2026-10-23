@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - run: pip install -e ".[ds,dev]"
+      - run: pip install -e ".[spark,ds,dev]"
       - run: ruff check src tests app
       - run: ruff format --check src tests app
       - run: pytest --cov=pitwall

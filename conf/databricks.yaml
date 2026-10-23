@@ -1,0 +1,9 @@
+# Databricks: Delta tables by path on an external location (deploy/databricks/, docs/cloud.md).
+# Runtime 15.4 LTS = Spark 3.5, Delta 3.2, Python 3.11, the same versions as local.
+# Set PITWALL_LAKEHOUSE_ROOT to a path your workspace has an external location for.
+lakehouse_root: s3://pitwall-lakehouse-CHANGE-ME/lakehouse
+
+spark:
+  master: ""          # the cluster's
+  delta_pip: false    # Delta is built into the runtime
+  conf: {}

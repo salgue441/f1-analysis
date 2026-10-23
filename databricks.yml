@@ -1,0 +1,88 @@
+# Databricks Asset Bundle: the season pipeline as a Databricks job (docs/cloud.md).
+#   databricks bundle deploy -t dev --var lakehouse_root=s3://<bucket>/lakehouse
+#   databricks bundle run pitwall_season -t dev --params season=2025
+# Runtime 15.4 LTS matches the local stack (Spark 3.5, Delta 3.2, Python 3.11). The wheel
+# leaves out the `spark` extra, so the runtime's own Spark and Delta are used.
+bundle:
+  name: pitwall
+
+variables:
+  lakehouse_root:
+    description: Path-based Delta root on an external location the job can write to.
+    default: s3://pitwall-lakehouse-CHANGE-ME/lakehouse
+  node_type:
+    description: Worker instance type (AWS example; use an Azure/GCP type there).
+    default: i3.xlarge
+  workers:
+    description: Number of workers for the job cluster.
+    default: 2
+
+artifacts:
+  pitwall:
+    type: whl
+    build: python -m build --wheel
+    path: .
+
+sync:
+  include:
+    - conf/*.yaml
+    - reports/**/*.json
+
+resources:
+  jobs:
+    pitwall_season:
+      name: pitwall-season-refresh
+      parameters:
+        - name: season
+          default: "2025"
+      job_clusters:
+        - job_cluster_key: main
+          new_cluster:
+            spark_version: 15.4.x-scala2.12
+            node_type_id: ${var.node_type}
+            num_workers: ${var.workers}
+            data_security_mode: SINGLE_USER
+            spark_env_vars:
+              PITWALL_ENV: databricks
+              PITWALL_CONF_DIR: /Workspace${workspace.file_path}/conf
+              PITWALL_LAKEHOUSE_ROOT: ${var.lakehouse_root}
+      tasks:
+        # Same steps as `make backfill` for one season: Jolpica results, then OpenF1 laps.
+        - task_key: results
+          job_cluster_key: main
+          python_wheel_task:
+            package_name: pitwall
+            entry_point: pitwall
+            parameters: ["run", "{{job.parameters.season}}"]
+          libraries:
+            - whl: ./dist/*.whl
+        - task_key: laps
+          depends_on:
+            - task_key: results
+          job_cluster_key: main
+          python_wheel_task:
+            package_name: pitwall
+            entry_point: pitwall
+            parameters: ["ingest", "openf1", "--season", "{{job.parameters.season}}"]
+          libraries:
+            - whl: ./dist/*.whl
+        - task_key: build_laps
+          depends_on:
+            - task_key: laps
+          job_cluster_key: main
+          python_wheel_task:
+            package_name: pitwall
+            entry_point: pitwall
+            parameters: ["run", "{{job.parameters.season}}", "--no-ingest", "--laps"]
+          libraries:
+            - whl: ./dist/*.whl
+      # Mirrors the Dagster schedule (Monday 06:00 UTC); paused until enabled on purpose.
+      schedule:
+        quartz_cron_expression: "0 0 6 ? * MON"
+        timezone_id: UTC
+        pause_status: PAUSED
+
+targets:
+  dev:
+    mode: development
+    default: true

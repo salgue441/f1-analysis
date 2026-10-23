@@ -9,6 +9,9 @@ services:
         required: false
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
+      # Defaults match the local S3 store (PITWALL_ENV=s3local); real keys in .env win.
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-pitwall}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-pitwall-secret}
     ports:
       - "3000:3000"   # Dagster UI
       - "4040:4040"   # Spark UI (local mode driver)
@@ -54,3 +57,27 @@ services:
       - spark-master
     deploy:
       replicas: 2
+
+  # Optional S3-compatible store (SeaweedFS): `docker compose --profile s3 up -d`, then
+  # PITWALL_ENV=s3local runs the same code against s3a://pitwall/lakehouse (docs/cloud.md).
+  s3:
+    image: chrislusf/seaweedfs:3.80
+    profiles: ["s3"]
+    command: server -dir=/data -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
+    volumes:
+      - s3-data:/data
+      - ./deploy/s3local/s3.json:/etc/seaweedfs/s3.json:ro
+    ports:
+      - "8333:8333"   # S3 API
+
+  s3-init:
+    image: chrislusf/seaweedfs:3.80
+    profiles: ["s3"]
+    depends_on:
+      - s3
+    entrypoint: >
+      sh -c "until echo 's3.bucket.list' | weed shell -master=s3:9333 | grep -q pitwall;
+      do echo 's3.bucket.create -name pitwall' | weed shell -master=s3:9333; sleep 2; done"
+
+volumes:
+  s3-data:
