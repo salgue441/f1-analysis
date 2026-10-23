@@ -40,9 +40,14 @@ def append_quarantine(df: DataFrame, path: str) -> None:
 
 
 def replace_partitions(df: DataFrame, path: str, partition_by: list[str]) -> None:
-    """Overwrite only the partitions present in `df` (dynamic partition overwrite)."""
+    """Overwrite only the partitions present in `df` (dynamic partition overwrite).
+
+    Repartitioning by the partition columns first writes one file per partition instead of
+    one per shuffle task: 2024 telemetry had ~19 files of ~0.6 MB per race before this.
+    """
     (
-        df.write.format("delta")
+        df.repartition(*partition_by)
+        .write.format("delta")
         .mode("overwrite")
         .option("partitionOverwriteMode", "dynamic")
         .partitionBy(*partition_by)
