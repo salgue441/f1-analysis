@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 
 from pitwall import pipelines
@@ -35,8 +36,21 @@ def main(argv: list[str] | None = None) -> None:
     build.add_argument("table", choices=[*SPECS, "silver-laps", "gold-dims", *GOLD_TARGETS])
     build.add_argument("--season", type=int, help="Required for season-partitioned tables")
 
+    run = sub.add_parser("run", help="Run the pipeline for a season without Dagster")
+    run.add_argument("season", type=int)
+    run.add_argument("--no-ingest", action="store_true", help="Rebuild from existing bronze")
+
+    sub.add_parser("fingerprints", help="Row counts + checksums of silver and gold tables")
+
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+
+    if args.command == "run":
+        pipelines.run_season(args.season, ingest=not args.no_ingest)
+        return
+    if args.command == "fingerprints":
+        print(json.dumps(pipelines.fingerprints(), indent=2, sort_keys=True))
+        return
 
     if args.command == "ingest" and args.source == "jolpica":
         if args.endpoint:
