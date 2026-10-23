@@ -60,7 +60,7 @@ def main(argv: list[str] | None = None) -> None:
     rq = sub.add_parser("research", help="Feature tables and research-question runs")
     rq_sub = rq.add_subparsers(dest="target", required=True)
     feat = rq_sub.add_parser("features", help="Build a feature table for seasons")
-    feat.add_argument("table", choices=["rq1", "rq2"])
+    feat.add_argument("table", choices=["rq1", "rq2", "rq3"])
     feat.add_argument("--season", type=int, action="append", required=True)
     rq1 = rq_sub.add_parser("rq1", help="Tire degradation: baselines, PyMC model, checks")
     rq1.add_argument("--train", type=int, nargs="+", default=[2023, 2024])
@@ -95,7 +95,11 @@ def main(argv: list[str] | None = None) -> None:
         from pitwall import research
 
         if args.target == "features":
-            build = research.build_feat_rq1 if args.table == "rq1" else research.build_feat_rq2
+            build = {
+                "rq1": research.build_feat_rq1,
+                "rq2": research.build_feat_rq2,
+                "rq3": research.build_feat_rq3,
+            }[args.table]
             print({s: build(s) for s in args.season})
         elif args.target == "rq1":
             results = research.run_rq1(
