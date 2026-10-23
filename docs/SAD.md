@@ -184,8 +184,8 @@ src/pitwall/
 
 | Bronze | Silver | Gold | Features |
 |---|---|---|---|
-| `jolpica_results`, `jolpica_qualifying`, `jolpica_pitstops`, `jolpica_drivers`, `jolpica_constructors`, `jolpica_circuits`, `jolpica_races` | `results`, `qualifying`, `pit_stops`, `drivers`, `constructors`, `circuits`, `races` | `dim_driver`, `dim_constructor`, `dim_circuit`, `dim_session`, `dim_compound`, `dim_date`, `dim_driver_team` (SCD2) | `feat_tire_degradation` (RQ1) |
-| `openf1_laps`, `openf1_stints`, `openf1_pit`, `openf1_position`, `openf1_race_control`, `openf1_weather`, `openf1_drivers`, `openf1_car_data`, `openf1_location` (`fastf1_*` inactive) | `laps`, `telemetry_car`, `telemetry_pos`, `weather`, `race_control`, `driver_id_map` | `fact_lap`, `fact_stint`, `fact_pit_stop`, `fact_session_result`, `fact_telemetry_sample` | `feat_pit_decision` (RQ2), `feat_race_sim_params` (RQ3), `feat_prerace` (RQ4) |
+| `jolpica_results`, `jolpica_qualifying`, `jolpica_pitstops`, `jolpica_drivers`, `jolpica_constructors`, `jolpica_circuits`, `jolpica_races` | `results`, `qualifying`, `pit_stops`, `drivers`, `constructors`, `circuits`, `races` | `dim_driver`, `dim_constructor`, `dim_circuit`, `dim_session`, `dim_compound`, `dim_date`, `dim_driver_team` (SCD2) | `feat_tire_degradation` (RQ1), `rq1_degradation_posterior` (RQ1 → RQ3) |
+| `openf1_laps`, `openf1_stints`, `openf1_pit`, `openf1_position`, `openf1_race_control`, `openf1_weather`, `openf1_drivers`, `openf1_car_data`, `openf1_location` (`fastf1_*` inactive) | `laps`, `telemetry_car`, `telemetry_pos`, `weather`, `race_control`, `driver_id_map` | `fact_lap`, `fact_stint`, `fact_pit_stop`, `fact_session_result`, `fact_telemetry_sample` | `feat_pit_cycle` + `feat_pit_decision` (RQ2), `feat_race_sim_params` + `feat_race_sim_cars` (RQ3), `feat_prerace` (RQ4, not built) |
 
 Full schemas, grains and the ERD are in [data-model.md](data-model.md).
 
@@ -289,7 +289,8 @@ Only `conf/<env>.yaml` changes (`lakehouse_root`, `spark.master`, credentials vi
 ### 9.2 Idempotency & incrementality
 
 - Bronze: append + deterministic `_batch_id = hash(source, request, content)`.
-- Silver: `MERGE` on natural key; latest `_ingested_at` wins.
+- Silver: `MERGE` on natural key; a matched row is only updated by a batch ingested at the same time or later, so "latest ingestion wins" regardless of run order. Telemetry replaces whole session partitions instead (dynamic partition overwrite).
+- Checked: rebuilding a season from bronze reproduces every silver and gold table bit-for-bit (`pitwall fingerprints`: row count + checksum per table).
 - Gold/features: `replaceWhere` per season partition.
 
 ### 9.3 Point-in-time correctness (leakage prevention)

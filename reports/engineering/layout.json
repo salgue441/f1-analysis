@@ -1,0 +1,149 @@
+{
+  "silver.laps": {
+    "query": "season = 2024 AND event_round = 12 AND driver_number = 16",
+    "zorder": [
+      "event_round",
+      "driver_number"
+    ],
+    "before": {
+      "files": 3,
+      "size_mb": 2.81,
+      "mean_file_mb": 0.938,
+      "partition_columns": [
+        "season"
+      ],
+      "files_read": 1,
+      "query_s_median": 0.569
+    },
+    "after": {
+      "files": 3,
+      "size_mb": 2.81,
+      "mean_file_mb": 0.938,
+      "partition_columns": [
+        "season"
+      ],
+      "files_read": 1,
+      "query_s_median": 0.452
+    }
+  },
+  "gold.fact_lap": {
+    "query": "season = 2024 AND event_round = 12 AND driver_id = 'leclerc'",
+    "zorder": [
+      "event_round",
+      "driver_key"
+    ],
+    "before": {
+      "files": 3,
+      "size_mb": 4.05,
+      "mean_file_mb": 1.351,
+      "partition_columns": [
+        "season"
+      ],
+      "files_read": 1,
+      "query_s_median": 0.445
+    },
+    "after": {
+      "files": 3,
+      "size_mb": 4.05,
+      "mean_file_mb": 1.351,
+      "partition_columns": [
+        "season"
+      ],
+      "files_read": 1,
+      "query_s_median": 0.429
+    }
+  },
+  "silver.telemetry_car": {
+    "query": "season = 2024 AND event_round = 12 AND driver_number = 16",
+    "zorder": [
+      "driver_number"
+    ],
+    "before": {
+      "files": 456,
+      "size_mb": 259.73,
+      "mean_file_mb": 0.57,
+      "partition_columns": [
+        "season",
+        "event_round",
+        "session_type"
+      ],
+      "files_read": 19,
+      "query_s_median": 0.472
+    },
+    "after": {
+      "files": 24,
+      "size_mb": 139.94,
+      "mean_file_mb": 5.831,
+      "partition_columns": [
+        "season",
+        "event_round",
+        "session_type"
+      ],
+      "files_read": 1,
+      "query_s_median": 0.285
+    }
+  },
+  "gold.fact_telemetry_sample": {
+    "query": "season = 2024 AND event_round = 12 AND driver_number = 16",
+    "zorder": [
+      "driver_number"
+    ],
+    "before": {
+      "files": 307,
+      "size_mb": 404.05,
+      "mean_file_mb": 1.316,
+      "partition_columns": [
+        "season",
+        "event_round",
+        "session_type"
+      ],
+      "files_read": 1,
+      "query_s_median": 0.299
+    },
+    "after": {
+      "files": 24,
+      "size_mb": 305.78,
+      "mean_file_mb": 12.741,
+      "partition_columns": [
+        "season",
+        "event_round",
+        "session_type"
+      ],
+      "files_read": 1,
+      "query_s_median": 0.293
+    }
+  },
+  "skew": {
+    "laps_per_race": {
+      "groups": 70,
+      "min_rows": 559,
+      "median_rows": 1070,
+      "max_rows": 1516,
+      "max_over_median": 1.42
+    },
+    "laps_per_driver_race": {
+      "groups": 1394,
+      "min_rows": 1,
+      "median_rows": 57,
+      "max_rows": 79,
+      "max_over_median": 1.39
+    },
+    "laps_per_circuit": {
+      "groups": 24,
+      "min_rows": 2099,
+      "median_rows": 3023,
+      "max_rows": 4178,
+      "max_over_median": 1.38
+    }
+  },
+  "fact_telemetry_sample": {
+    "files": 24,
+    "size_mb": 305.78,
+    "mean_file_mb": 12.741,
+    "partition_columns": [
+      "season",
+      "event_round",
+      "session_type"
+    ]
+  }
+}

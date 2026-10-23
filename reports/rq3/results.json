@@ -1,0 +1,390 @@
+{
+  "backtest": {
+    "per_race": [
+      {
+        "circuit_id": "albert_park",
+        "race_id": "2025_01",
+        "rps_grid": 0.2473684210526316,
+        "rps_model": 0.12372945752631578
+      },
+      {
+        "circuit_id": "shanghai",
+        "race_id": "2025_02",
+        "rps_grid": 0.2578947368421053,
+        "rps_model": 0.16118973684210522
+      },
+      {
+        "circuit_id": "suzuka",
+        "race_id": "2025_03",
+        "rps_grid": 0.047368421052631574,
+        "rps_model": 0.05513382505263158
+      },
+      {
+        "circuit_id": "bahrain",
+        "race_id": "2025_04",
+        "rps_grid": 0.16842105263157894,
+        "rps_model": 0.11614528826315791
+      },
+      {
+        "circuit_id": "jeddah",
+        "race_id": "2025_05",
+        "rps_grid": 0.14736842105263157,
+        "rps_model": 0.09328652015789474
+      },
+      {
+        "circuit_id": "miami",
+        "race_id": "2025_06",
+        "rps_grid": 0.13157894736842105,
+        "rps_model": 0.17686327873684207
+      },
+      {
+        "circuit_id": "imola",
+        "race_id": "2025_07",
+        "rps_grid": 0.1894736842105263,
+        "rps_model": 0.13161733810526316
+      },
+      {
+        "circuit_id": "monaco",
+        "race_id": "2025_08",
+        "rps_grid": 0.14736842105263157,
+        "rps_model": 0.09705065394736842
+      },
+      {
+        "circuit_id": "catalunya",
+        "race_id": "2025_09",
+        "rps_grid": 0.1812865497076023,
+        "rps_model": 0.1299222345614035
+      },
+      {
+        "circuit_id": "villeneuve",
+        "race_id": "2025_10",
+        "rps_grid": 0.16842105263157894,
+        "rps_model": 0.19243588615789473
+      },
+      {
+        "circuit_id": "red_bull_ring",
+        "race_id": "2025_11",
+        "rps_grid": 0.16842105263157897,
+        "rps_model": 0.0823124047368421
+      },
+      {
+        "circuit_id": "silverstone",
+        "race_id": "2025_12",
+        "rps_grid": 0.23157894736842105,
+        "rps_model": 0.18246327610526314
+      },
+      {
+        "circuit_id": "spa",
+        "race_id": "2025_13",
+        "rps_grid": 0.1526315789473684,
+        "rps_model": 0.16002067599999997
+      },
+      {
+        "circuit_id": "hungaroring",
+        "race_id": "2025_14",
+        "rps_grid": 0.12105263157894737,
+        "rps_model": 0.09425204363157895
+      },
+      {
+        "circuit_id": "zandvoort",
+        "race_id": "2025_15",
+        "rps_grid": 0.3157894736842105,
+        "rps_model": 0.18328770384210524
+      },
+      {
+        "circuit_id": "monza",
+        "race_id": "2025_16",
+        "rps_grid": 0.15789473684210525,
+        "rps_model": 0.12093995521052629
+      },
+      {
+        "circuit_id": "baku",
+        "race_id": "2025_17",
+        "rps_grid": 0.1368421052631579,
+        "rps_model": 0.13881390168421054
+      },
+      {
+        "circuit_id": "marina_bay",
+        "race_id": "2025_18",
+        "rps_grid": 0.12105263157894737,
+        "rps_model": 0.09280554526315792
+      },
+      {
+        "circuit_id": "americas",
+        "race_id": "2025_19",
+        "rps_grid": 0.1526315789473684,
+        "rps_model": 0.10866675736842105
+      },
+      {
+        "circuit_id": "rodriguez",
+        "race_id": "2025_20",
+        "rps_grid": 0.17894736842105263,
+        "rps_model": 0.10056858363157894
+      },
+      {
+        "circuit_id": "interlagos",
+        "race_id": "2025_21",
+        "rps_grid": 0.17368421052631577,
+        "rps_model": 0.11728934615789473
+      },
+      {
+        "circuit_id": "vegas",
+        "race_id": "2025_22",
+        "rps_grid": 0.2947368421052632,
+        "rps_model": 0.1928706213157895
+      },
+      {
+        "circuit_id": "losail",
+        "race_id": "2025_23",
+        "rps_grid": 0.20526315789473687,
+        "rps_model": 0.10380343215789474
+      },
+      {
+        "circuit_id": "yas_marina",
+        "race_id": "2025_24",
+        "rps_grid": 0.1368421052631579,
+        "rps_model": 0.11036023589473684
+      }
+    ],
+    "rps_grid_baseline": 0.17640308146845887,
+    "rps_improvement_ci": [
+      0.030523573713023888,
+      0.06580613274881214
+    ],
+    "rps_improvement_per_race_mean": 0.048670392762670565,
+    "rps_model": 0.12773831276086875,
+    "share_races_model_better": 0.7916666666666666,
+    "top10_ece": 0.09260501043841333,
+    "win_brier": 0.030369318496868476,
+    "win_brier_grid": 0.033402922755741124
+  },
+  "backtest_sims": 10000,
+  "decision": {
+    "mean_gain_ci": [
+      2.888500829221491,
+      5.300428666392544
+    ],
+    "mean_gain_per_driver_race": 4.047630480167014,
+    "median_gain_per_driver_race": 2.55,
+    "n_candidates_per_race_mean": 546.75,
+    "n_driver_races": 479,
+    "share_gain_below_0_5_pts": 0.19624217118997914,
+    "share_gain_over_2_se": 0.9331941544885177,
+    "top_gains": [
+      {
+        "actual_points": 1.245,
+        "driver_id": "alonso",
+        "expected_points": 19.935,
+        "p_better_than_actual": 0.845,
+        "points_gain_se": 0.432,
+        "points_gain_vs_actual": 18.69,
+        "race_id": "2025_10",
+        "strategy": "MS-43"
+      },
+      {
+        "actual_points": 4.065,
+        "driver_id": "leclerc",
+        "expected_points": 19.798,
+        "p_better_than_actual": 0.842,
+        "points_gain_se": 0.39,
+        "points_gain_vs_actual": 15.732,
+        "race_id": "2025_10",
+        "strategy": "SMS-22-50"
+      },
+      {
+        "actual_points": 0.132,
+        "driver_id": "gasly",
+        "expected_points": 15.232,
+        "p_better_than_actual": 0.89,
+        "points_gain_se": 0.287,
+        "points_gain_vs_actual": 15.1,
+        "race_id": "2025_13",
+        "strategy": "SH-10"
+      },
+      {
+        "actual_points": 0.885,
+        "driver_id": "ocon",
+        "expected_points": 15.885,
+        "p_better_than_actual": 0.912,
+        "points_gain_se": 0.261,
+        "points_gain_vs_actual": 15.0,
+        "race_id": "2025_13",
+        "strategy": "SH-13"
+      },
+      {
+        "actual_points": 0.215,
+        "driver_id": "bearman",
+        "expected_points": 15.188,
+        "p_better_than_actual": 0.892,
+        "points_gain_se": 0.284,
+        "points_gain_vs_actual": 14.972,
+        "race_id": "2025_13",
+        "strategy": "SH-10"
+      },
+      {
+        "actual_points": 5.392,
+        "driver_id": "hamilton",
+        "expected_points": 20.278,
+        "p_better_than_actual": 0.842,
+        "points_gain_se": 0.377,
+        "points_gain_vs_actual": 14.885,
+        "race_id": "2025_10",
+        "strategy": "MMS-22-50"
+      },
+      {
+        "actual_points": 0.06,
+        "driver_id": "hulkenberg",
+        "expected_points": 14.77,
+        "p_better_than_actual": 0.89,
+        "points_gain_se": 0.282,
+        "points_gain_vs_actual": 14.71,
+        "race_id": "2025_13",
+        "strategy": "SH-10"
+      },
+      {
+        "actual_points": 2.088,
+        "driver_id": "bortoleto",
+        "expected_points": 16.575,
+        "p_better_than_actual": 0.91,
+        "points_gain_se": 0.266,
+        "points_gain_vs_actual": 14.488,
+        "race_id": "2025_13",
+        "strategy": "SH-13"
+      },
+      {
+        "actual_points": 0.042,
+        "driver_id": "alonso",
+        "expected_points": 14.412,
+        "p_better_than_actual": 0.878,
+        "points_gain_se": 0.436,
+        "points_gain_vs_actual": 14.37,
+        "race_id": "2025_01",
+        "strategy": "SH-13"
+      },
+      {
+        "actual_points": 0.02,
+        "driver_id": "leclerc",
+        "expected_points": 14.21,
+        "p_better_than_actual": 0.795,
+        "points_gain_se": 0.49,
+        "points_gain_vs_actual": 14.19,
+        "race_id": "2025_21",
+        "strategy": "SSH-22-44"
+      }
+    ]
+  },
+  "decision_sims": 800,
+  "dnf_hazard_per_lap": 0.0024381534066421208,
+  "million_run": {
+    "cores": 16,
+    "n_sims": 1000000,
+    "p_win_top3": {
+      "max_verstappen": 0.040139,
+      "norris": 0.571576,
+      "piastri": 0.342813
+    },
+    "race_id": "2025_01",
+    "seconds": 20.54342482100037
+  },
+  "mlflow_run_id": "71db65c45f9a4f6aaaf3f43c5fa0cbd6",
+  "n_races": 24,
+  "pace_noise_sd_s": 0.1,
+  "pace_scale": 1.0,
+  "pace_tuning": {
+    "grid": [
+      {
+        "pace_noise_sd_s": 0.1,
+        "pace_scale": 0.5,
+        "rps_model": 0.1012,
+        "top10_ece": 0.0773
+      },
+      {
+        "pace_noise_sd_s": 0.25,
+        "pace_scale": 0.5,
+        "rps_model": 0.1049,
+        "top10_ece": 0.0833
+      },
+      {
+        "pace_noise_sd_s": 0.4,
+        "pace_scale": 0.5,
+        "rps_model": 0.1112,
+        "top10_ece": 0.0976
+      },
+      {
+        "pace_noise_sd_s": 0.1,
+        "pace_scale": 0.75,
+        "rps_model": 0.0991,
+        "top10_ece": 0.0753
+      },
+      {
+        "pace_noise_sd_s": 0.25,
+        "pace_scale": 0.75,
+        "rps_model": 0.1008,
+        "top10_ece": 0.0781
+      },
+      {
+        "pace_noise_sd_s": 0.4,
+        "pace_scale": 0.75,
+        "rps_model": 0.1047,
+        "top10_ece": 0.0815
+      },
+      {
+        "pace_noise_sd_s": 0.1,
+        "pace_scale": 1.0,
+        "rps_model": 0.0989,
+        "top10_ece": 0.0638
+      },
+      {
+        "pace_noise_sd_s": 0.25,
+        "pace_scale": 1.0,
+        "rps_model": 0.0994,
+        "top10_ece": 0.0768
+      },
+      {
+        "pace_noise_sd_s": 0.4,
+        "pace_scale": 1.0,
+        "rps_model": 0.1017,
+        "top10_ece": 0.0705
+      }
+    ],
+    "season": 2024
+  },
+  "scaling": [
+    {
+      "n_sims": 200000,
+      "parallelism": 1,
+      "seconds": 14.403731719001371,
+      "sims_per_second": 13885.29055537465,
+      "speedup": 1.0
+    },
+    {
+      "n_sims": 200000,
+      "parallelism": 2,
+      "seconds": 8.175795892995666,
+      "sims_per_second": 24462.450214950102,
+      "speedup": 1.7617528504278435
+    },
+    {
+      "n_sims": 200000,
+      "parallelism": 4,
+      "seconds": 6.0055523549963254,
+      "sims_per_second": 33302.51543533873,
+      "speedup": 2.3984024894926064
+    },
+    {
+      "n_sims": 200000,
+      "parallelism": 8,
+      "seconds": 4.694759181002155,
+      "sims_per_second": 42600.694154733515,
+      "speedup": 3.068044848240057
+    },
+    {
+      "n_sims": 200000,
+      "parallelism": 16,
+      "seconds": 5.037119065003935,
+      "sims_per_second": 39705.235754605645,
+      "speedup": 2.859517818245203
+    }
+  ],
+  "season": 2025
+}
