@@ -34,3 +34,14 @@ def merge_into_delta(
 
 def append_quarantine(df: DataFrame, path: str) -> None:
     df.write.format("delta").mode("append").option("mergeSchema", "true").save(path)
+
+
+def replace_partitions(df: DataFrame, path: str, partition_by: list[str]) -> None:
+    """Overwrite only the partitions present in `df` (dynamic partition overwrite)."""
+    (
+        df.write.format("delta")
+        .mode("overwrite")
+        .option("partitionOverwriteMode", "dynamic")
+        .partitionBy(*partition_by)
+        .save(path)
+    )

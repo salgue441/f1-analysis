@@ -5,6 +5,10 @@ lakehouse_root: /workspace/data/lakehouse
 seasons:
   start: 2018
   end: 2025
+# Lap-level data comes from OpenF1, which starts in 2023 (ADR-0006).
+lap_seasons:
+  start: 2023
+  end: 2025
 
 jolpica:
   base_url: https://api.jolpi.ca/ergast/f1
@@ -12,6 +16,14 @@ jolpica:
   min_interval_s: 8.0        # ~450 req/hour, under the 500/hour limit
   max_retries: 5
 
+openf1:
+  base_url: https://api.openf1.org/v1
+  min_interval_s: 2.1        # free tier: ~30 req/min
+  max_retries: 5
+  session_types: [R]
+
+# FastF1 is kept for when its archive is reachable again; it needs an F1 TV login since
+# Oct 2026 (ADR-0006).
 fastf1:
   cache_dir: /workspace/data/fastf1_cache
   session_types: [R]         # add Q, S, FP2 later for practice long runs
@@ -23,6 +35,7 @@ spark:
     spark.sql.adaptive.enabled: "true"
     spark.sql.adaptive.skewJoin.enabled: "true"
     spark.driver.memory: 4g
+    spark.ui.showConsoleProgress: "false"
 
 quality:
   max_quarantine_ratio: 0.05  # fail the batch if more than 5% of rows are rejected

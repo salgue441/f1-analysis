@@ -55,6 +55,10 @@ def transform_laps(bronze: DataFrame) -> DataFrame:
         F.col("is_accurate").cast("boolean").alias("is_accurate"),
         F.col("deleted").cast("boolean").alias("is_deleted"),
         F.col("position").cast("int").alias("position_end_of_lap"),
+        # Session time (s since session start) at the lap's start and at the line.
+        _seconds("lap_start_time").alias("lap_start_time_s"),
+        _seconds("time").alias("lap_end_time_s"),
+        _seconds("speed_st").alias("speed_trap_kmh"),
         F.col("_ingested_at"),
         F.col("_batch_id").alias("_source_batch_id"),
     )

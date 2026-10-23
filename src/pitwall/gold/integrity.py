@@ -26,3 +26,10 @@ def check_foreign_keys(fact: DataFrame, dims: dict[str, DataFrame]) -> dict[str,
     if bad:
         raise IntegrityError(f"Orphaned foreign keys: {bad}")
     return orphans
+
+
+def check_unique(df: DataFrame, key: str) -> None:
+    """A table's primary key must be unique (joins that fan out are caught here)."""
+    dupes = df.groupBy(key).count().filter(F.col("count") > 1).limit(5).collect()
+    if dupes:
+        raise IntegrityError(f"Duplicate {key}: {[r[key] for r in dupes]}")
