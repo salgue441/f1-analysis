@@ -56,6 +56,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("maintain", help="OPTIMIZE (+Z-order) and VACUUM every lakehouse table")
 
     sub.add_parser("fingerprints", help="Row counts + checksums of silver and gold tables")
+    sub.add_parser("perf", help="Layout before/after OPTIMIZE + skew -> reports/engineering")
 
     rq = sub.add_parser("research", help="Feature tables and research-question runs")
     rq_sub = rq.add_subparsers(dest="target", required=True)
@@ -132,6 +133,11 @@ def main(argv: list[str] | None = None) -> None:
         return
     if args.command == "maintain":
         print(json.dumps(pipelines.maintain(), indent=2))
+        return
+    if args.command == "perf":
+        from pitwall import perf
+
+        print(json.dumps(perf.layout_report(), indent=2, default=str))
         return
     if args.command == "fingerprints":
         print(json.dumps(pipelines.fingerprints(), indent=2, sort_keys=True))

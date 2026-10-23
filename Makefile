@@ -4,7 +4,7 @@ SEASONS ?= 2018 2019 2020 2021 2022 2023 2024 2025
 LAP_SEASONS ?= 2023 2024 2025
 
 .PHONY: help up down cluster shell test test-all lint fmt typecheck lock ingest-results \
-	backfill features eda rq1 rq2 rq3 research demo maintain dagster jupyter app
+	backfill features eda rq1 rq2 rq3 research demo perf maintain dagster jupyter app
 
 help:  ## Show targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -72,6 +72,9 @@ demo:  ## Small end-to-end run: 2024 results, two races of laps, quick RQ1 fit
 	$(EXEC) pitwall run 2024 --no-ingest --laps
 	$(EXEC) pitwall research features rq1 --season 2024
 	$(EXEC) pitwall research rq1 --train 2024 --test 2024 --draws 300 --tune 300 --chains 2 --no-sensitivity
+
+perf:  ## Layout before/after OPTIMIZE + Z-order, key skew -> reports/engineering
+	$(EXEC) pitwall perf
 
 maintain:  ## OPTIMIZE + Z-order + VACUUM all tables
 	$(EXEC) pitwall maintain
