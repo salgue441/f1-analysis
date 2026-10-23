@@ -3,6 +3,10 @@
 > *How fast do tires really wear? Does the undercut actually work? What should teams have done?*
 > Bayesian, causal and simulation models on a Spark + Delta Lake lakehouse built from F1 timing data: results 2018–2025, laps, tyres and weather 2023–2025.
 
+![Strategy explorer: try a strategy, see the simulated finishing distribution](docs/img/demo.gif)
+
+📝 **Blog post:** [Tyres, undercuts and a million simulated races](docs/blog/f1-strategy-under-uncertainty.md), the story of the project, what worked and what didn't.
+
 ## Key findings
 
 Each finding states its uncertainty. The full write-ups (method, robustness, limitations) are linked.
@@ -35,7 +39,14 @@ FastF1 (inactive)┘                       └─► Quarantine                 
 - **Compute:** PySpark (ETL, features, distributed simulation) + PyMC / scikit-learn / EconML (modeling on feature tables)
 - **Orchestration:** Dagster assets partitioned by season, with weekly maintenance (OPTIMIZE, Z-order, VACUUM)
 - **Quality:** expectations with quarantine and a per-run DQ log; facts checked for unique keys and orphaned foreign keys before every write; rebuilding a season gives bit-identical tables (checked with row counts + checksums)
-- **Docs:** [Architecture (SAD)](docs/SAD.md) · [Data model / ERD](docs/data-model.md) · [ADRs](docs/adr/) · [Roadmap](docs/roadmap.md)
+- **Docs:** [Architecture (SAD)](docs/SAD.md) · [Data model / ERD](docs/data-model.md#erd) · [ADRs](docs/adr/) · [Roadmap](docs/roadmap.md)
+
+<details>
+<summary>Dagster asset lineage (<code>make dagster</code>)</summary>
+
+![Dagster global asset lineage: bronze, silver, gold, telemetry and maintenance groups](docs/img/dagster_lineage.png)
+
+</details>
 
 **Data-source note.** Since October 2026 the F1 timing archive behind FastF1 needs an F1 TV login. Lap-level data therefore comes from [OpenF1](https://openf1.org), which is free but starts in 2023. Silver keeps the same schemas whichever source fed it, and the FastF1 path is still in the code. See [ADR-0006](docs/adr/0006-openf1-as-lap-data-source.md).
 
@@ -64,7 +75,7 @@ make dagster         # asset graph at http://localhost:3000
 
 ```
 conf/            configuration (base + per-environment)
-docs/            SAD, data model, research plan, roadmap, ADRs
+docs/            SAD, data model, research plan, roadmap, ADRs, blog post, images
 src/pitwall/     package: ingestion, bronze, silver, gold, features, quality, models, simulation,
                  orchestration, research (RQ runs), serving (app reads), tracking (MLflow)
 tests/           unit tests (local Spark + Delta), slow model-recovery test
