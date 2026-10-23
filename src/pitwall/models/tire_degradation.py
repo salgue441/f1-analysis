@@ -88,7 +88,9 @@ def build_model(
     with pm.Model(coords=coords) as model:
         race_offset = pm.Normal("race_offset", 0.0, 2.0, dims="race")
         driver_sigma = pm.HalfNormal("driver_sigma", 0.5)
-        driver_offset = pm.Normal("driver_offset", 0.0, driver_sigma, dims="driver")
+        # Sum-to-zero: race offsets already absorb each race's average pace, so an
+        # unconstrained driver mean is barely identified and driver_sigma mixes slowly.
+        driver_offset = pm.ZeroSumNormal("driver_offset", sigma=driver_sigma, dims="driver")
 
         # Seconds per lap of remaining fuel (heavier car is slower).
         fuel_effect = pm.Normal("fuel_effect", *fuel_prior)
