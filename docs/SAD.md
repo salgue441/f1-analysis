@@ -148,15 +148,21 @@ src/pitwall/
 ├── config.py            # typed settings (conf/*.yaml + env overrides)
 ├── spark.py             # SparkSession factory (Delta, AQE, UTC)
 ├── paths.py             # table path conventions per layer
-├── ingestion/           # source clients → bronze
-├── bronze/              # generic bronze writer (+ ingestion metadata)
-├── silver/              # cleaning, typing, dedup, conformance
-├── gold/                # dimensions, facts (incl. SCD2)
-├── features/            # ML feature tables built from gold
-├── quality/             # expectations + quarantine
-├── models/              # RQ1 tire_degradation, RQ2 causal, RQ4 predict
-├── simulation/          # RQ3 Monte Carlo race simulator
-├── orchestration/       # Dagster asset definitions
+├── asof.py              # backward as-of join (point-in-time correct by construction)
+├── ingestion/           # Jolpica + OpenF1 clients (rate-limited), FastF1 loader (inactive)
+├── bronze/              # generic append-only writer (+ ingestion metadata)
+├── silver/              # per-source transforms, spec registry, MERGE, driver_id_map
+├── gold/                # dims (incl. SCD2), facts, keys, integrity checks, writers
+├── features/            # one builder per RQ: tire_degradation, pit_decision, race_sim_params
+├── quality/             # expectations, quarantine, DQ run log
+├── models/              # RQ1 Bayesian model + baselines + evaluation; RQ2 causal estimators
+├── simulation/          # RQ3 field simulator, strategies, scoring, Spark distribution
+├── orchestration/       # Dagster assets, jobs, schedules
+├── pipelines.py         # data-platform I/O wiring (CLI + Dagster share it)
+├── research.py          # feature builds + end-to-end RQ runs (MLflow, reports/)
+├── tracking.py          # MLflow runs with git SHA, Delta versions, seed, config
+├── serving.py           # Spark-free reads (delta-rs) for the Streamlit app
+├── maintenance.py       # OPTIMIZE / Z-order / VACUUM, skew diagnostics
 └── cli.py               # `pitwall ...` entry point
 ```
 
