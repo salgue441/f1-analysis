@@ -141,3 +141,18 @@ Degradation and fuel draws are joined from `features.rq1_degradation_posterior` 
 ### `feat_prerace` (RQ4) — grain: driver × race
 
 Grid, qualifying gap to pole, long-run practice pace, rolling form (last N races), circuit history. Only uses information before race start.
+
+### `feat_prerace` (RQ4) — grain: driver × Grand Prix
+
+Only pre-race information; form windows end one race before the current one (tested).
+
+| Column | Definition |
+|---|---|
+| `grid_pos`, `from_pit_lane` | grid after penalties; pit-lane starts placed behind the last slot |
+| `quali_position`, `quali_gap_pct` | qualifying position; gap to pole in %, capped at 7% (107% rule) |
+| `driver_points_l5`, `driver_finish_l5`, `driver_dnf_l10`, `driver_starts` | driver form over the previous 5 races (DNF rate: 10), experience |
+| `team_points_l5`, `team_finish_l5` | team form per car over the previous 5 races; `team` = constructor lineage group |
+| `circuit_pos_change` | mean \|finish − grid\| at the circuit in earlier seasons |
+| `podium`, `scored_points`, `finish_position` | targets |
+
+Partitioned by `season`, 2018–2025.
