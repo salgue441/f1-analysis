@@ -1,0 +1,318 @@
+{
+  "cycle": {
+    "balance": {
+      "max_abs_smd_after": 0.08876421072482645,
+      "max_abs_smd_before": 0.343154137002949,
+      "share_covariates_balanced_after": 1.0,
+      "smd_after": {
+        "compound_INTERMEDIATE": 0.079,
+        "compound_MEDIUM": -0.04,
+        "compound_SOFT": 0.062,
+        "deg_tier_low": 0.045,
+        "deg_tier_mid": 0.021,
+        "gap_s": -0.043,
+        "laps_remaining": -0.028,
+        "pit_loss_s": -0.006,
+        "position": -0.045,
+        "race_fraction_remaining": -0.058,
+        "rejoin_traffic_cars": -0.048,
+        "rival_compound_INTERMEDIATE": 0.079,
+        "rival_compound_MEDIUM": -0.033,
+        "rival_compound_SOFT": -0.03,
+        "rival_tyre_life": -0.019,
+        "track_temp_c": -0.004,
+        "tyre_life": 0.089
+      },
+      "smd_before": {
+        "compound_INTERMEDIATE": 0.101,
+        "compound_MEDIUM": -0.093,
+        "compound_SOFT": -0.008,
+        "deg_tier_low": 0.112,
+        "deg_tier_mid": -0.156,
+        "gap_s": 0.343,
+        "laps_remaining": -0.137,
+        "pit_loss_s": 0.116,
+        "position": 0.039,
+        "race_fraction_remaining": -0.044,
+        "rejoin_traffic_cars": 0.048,
+        "rival_compound_INTERMEDIATE": 0.101,
+        "rival_compound_MEDIUM": 0.061,
+        "rival_compound_SOFT": -0.231,
+        "rival_tyre_life": -0.194,
+        "track_temp_c": -0.152,
+        "tyre_life": 0.032
+      }
+    },
+    "by_deg_tier": {
+      "high": {
+        "effect": 0.4952342225506318,
+        "hi": 0.6315639288484568,
+        "lo": 0.35890451625280684,
+        "method": "dml",
+        "n": 240,
+        "n_treated": 115,
+        "se": 0.06955597260093113
+      },
+      "low": {
+        "effect": -0.026478271771004168,
+        "hi": 0.19924170728395185,
+        "lo": -0.2521982508259602,
+        "method": "dml",
+        "n": 120,
+        "n_treated": 62,
+        "se": 0.11516325461987553
+      },
+      "mid": {
+        "effect": 0.4898766265801681,
+        "hi": 0.6338471023520081,
+        "lo": 0.3459061508083281,
+        "method": "dml",
+        "n": 183,
+        "n_treated": 75,
+        "se": 0.07345432437338778
+      }
+    },
+    "dml_with_recent_gap_trend": {
+      "effect": 0.44221600544143636,
+      "hi": 0.5460115679492037,
+      "lo": 0.33842044293366896,
+      "method": "dml",
+      "n": 521,
+      "n_treated": 254,
+      "se": 0.05295691964682009
+    },
+    "n_races": 55,
+    "n_treated": 254,
+    "n_units": 548,
+    "overlap": {
+      "control_kept": 291,
+      "share_kept": 0.9908759124087592,
+      "treated_kept": 252
+    },
+    "p_ahead_control_raw": 0.20068027210884354,
+    "p_ahead_treated_raw": 0.5393700787401575,
+    "permuted_treatment": {
+      "mean_effect": 0.022151271901779616,
+      "n_perm": 20,
+      "sd_effect": 0.04248660586623843
+    },
+    "placebo_gap_gain_before_s": {
+      "effect": -0.6461660994550184,
+      "hi": -0.3835920027475827,
+      "lo": -0.9087401961624539,
+      "method": "dml",
+      "n": 545,
+      "n_treated": 254,
+      "se": 0.13396637587114063
+    },
+    "primary": {
+      "dml": {
+        "effect": 0.37732870577039623,
+        "hi": 0.4904686863285104,
+        "lo": 0.2641887252122821,
+        "method": "dml",
+        "n": 543,
+        "n_treated": 252,
+        "se": 0.05772447987658884
+      },
+      "econml_linear_dml": {
+        "effect": 0.4094672197862921,
+        "hi": 0.4823693196308785,
+        "lo": 0.3365651199417057
+      },
+      "ipw": {
+        "effect": 0.39012116978423494,
+        "hi": 0.5078355325180467,
+        "lo": 0.2594225818606332,
+        "method": "ipw",
+        "n": 543,
+        "n_treated": 252,
+        "se": 0.06600944526538763
+      },
+      "naive": {
+        "effect": 0.33868980663131326,
+        "hi": 0.45665180885465373,
+        "lo": 0.22072780440797282,
+        "method": "naive",
+        "n": 548,
+        "n_treated": 254,
+        "se": 0.06018469501190839
+      }
+    },
+    "secondary_gap_gain_s": {
+      "effect": 4.798600439013674,
+      "hi": 7.109062755724992,
+      "lo": 2.488138122302356,
+      "method": "dml",
+      "n": 543,
+      "n_treated": 252,
+      "se": 1.17880730444455
+    },
+    "sensitivity": {
+      "e_value": 5.352389168827296,
+      "e_value_ci": 4.1286090068308425,
+      "risk_ratio": 2.951955090352253
+    }
+  },
+  "lap": {
+    "balance": {
+      "max_abs_smd_after": 0.2621673627439309,
+      "max_abs_smd_before": 0.3052136604163905,
+      "share_covariates_balanced_after": 0.5882352941176471,
+      "smd_after": {
+        "compound_INTERMEDIATE": -0.217,
+        "compound_MEDIUM": -0.077,
+        "compound_SOFT": 0.178,
+        "deg_tier_low": -0.262,
+        "deg_tier_mid": -0.065,
+        "gap_s": 0.089,
+        "laps_remaining": -0.145,
+        "pit_loss_s": 0.002,
+        "position": 0.016,
+        "race_fraction_remaining": -0.028,
+        "rejoin_traffic_cars": -0.142,
+        "rival_compound_INTERMEDIATE": -0.217,
+        "rival_compound_MEDIUM": -0.03,
+        "rival_compound_SOFT": 0.058,
+        "rival_tyre_life": -0.106,
+        "track_temp_c": -0.028,
+        "tyre_life": -0.006
+      },
+      "smd_before": {
+        "compound_INTERMEDIATE": -0.197,
+        "compound_MEDIUM": -0.144,
+        "compound_SOFT": 0.231,
+        "deg_tier_low": -0.305,
+        "deg_tier_mid": -0.042,
+        "gap_s": 0.063,
+        "laps_remaining": -0.159,
+        "pit_loss_s": -0.086,
+        "position": 0.046,
+        "race_fraction_remaining": -0.074,
+        "rejoin_traffic_cars": -0.208,
+        "rival_compound_INTERMEDIATE": -0.197,
+        "rival_compound_MEDIUM": -0.041,
+        "rival_compound_SOFT": 0.067,
+        "rival_tyre_life": -0.147,
+        "track_temp_c": -0.005,
+        "tyre_life": 0.078
+      }
+    },
+    "by_deg_tier": {
+      "high": {
+        "effect": 0.15401232990422134,
+        "hi": 0.2230488679781108,
+        "lo": 0.0849757918303319,
+        "method": "dml",
+        "n": 1232,
+        "n_treated": 95,
+        "se": 0.035222723507086454
+      },
+      "low": {
+        "effect": 0.0839565118658026,
+        "hi": 0.4317279671479246,
+        "lo": -0.2638149434163194,
+        "method": "dml",
+        "n": 389,
+        "n_treated": 9,
+        "se": 0.17743441596026632
+      },
+      "mid": {
+        "effect": 0.23566965538821086,
+        "hi": 0.3728971396356032,
+        "lo": 0.09844217114081849,
+        "method": "dml",
+        "n": 1349,
+        "n_treated": 80,
+        "se": 0.07001402257520019
+      }
+    },
+    "dml_with_recent_gap_trend": {
+      "effect": 0.13054103870156913,
+      "hi": 0.20829276829338927,
+      "lo": 0.05278930910974901,
+      "method": "dml",
+      "n": 2526,
+      "n_treated": 179,
+      "se": 0.039669249791744965
+    },
+    "n_races": 70,
+    "n_treated": 480,
+    "n_units": 21089,
+    "overlap": {
+      "control_kept": 2786,
+      "share_kept": 0.14083171321542037,
+      "treated_kept": 184
+    },
+    "p_ahead_control_raw": 0.3185016255034208,
+    "p_ahead_treated_raw": 0.40625,
+    "permuted_treatment": {
+      "mean_effect": 0.004610231486373394,
+      "n_perm": 20,
+      "sd_effect": 0.25735373315827903
+    },
+    "placebo_gap_gain_before_s": {
+      "effect": -0.6030383669579878,
+      "hi": -0.1111927907282036,
+      "lo": -1.0948839431877722,
+      "method": "dml",
+      "n": 2712,
+      "n_treated": 175,
+      "se": 0.25094162052540014
+    },
+    "primary": {
+      "dml": {
+        "effect": 0.18558190675670938,
+        "hi": 0.2583621158480617,
+        "lo": 0.11280169766535707,
+        "method": "dml",
+        "n": 2970,
+        "n_treated": 184,
+        "se": 0.037132759740485875
+      },
+      "econml_linear_dml": {
+        "effect": 0.21249667446771814,
+        "hi": 0.27851936948823985,
+        "lo": 0.1464739794471964
+      },
+      "ipw": {
+        "effect": 0.19244901302610973,
+        "hi": 0.2705356295895209,
+        "lo": 0.09578067025988149,
+        "method": "ipw",
+        "n": 2970,
+        "n_treated": 184,
+        "se": 0.04469585793467479
+      },
+      "naive": {
+        "effect": 0.0877483744965797,
+        "hi": 0.1466146065924855,
+        "lo": 0.02888214240067389,
+        "method": "naive",
+        "n": 21089,
+        "n_treated": 480,
+        "se": 0.03003379188566623
+      }
+    },
+    "secondary_gap_gain_s": {
+      "effect": 1.4166564146320473,
+      "hi": 4.408219962726013,
+      "lo": -1.5749071334619182,
+      "method": "dml",
+      "n": 2970,
+      "n_treated": 184,
+      "se": 1.5263079327010027
+    },
+    "sensitivity": {
+      "e_value": 2.824788580981054,
+      "e_value_ci": 2.1876802538988587,
+      "risk_ratio": 1.7161626206615441
+    }
+  },
+  "mlflow_run_id": "9bfc9ca7fdac42bb9cdbaefb3e423c51",
+  "seasons": [
+    2023,
+    2024,
+    2025
+  ]
+}
