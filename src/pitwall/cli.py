@@ -60,7 +60,7 @@ def main(argv: list[str] | None = None) -> None:
     rq = sub.add_parser("research", help="Feature tables and research-question runs")
     rq_sub = rq.add_subparsers(dest="target", required=True)
     feat = rq_sub.add_parser("features", help="Build a feature table for seasons")
-    feat.add_argument("table", choices=["rq1"])
+    feat.add_argument("table", choices=["rq1", "rq2"])
     feat.add_argument("--season", type=int, action="append", required=True)
     rq1 = rq_sub.add_parser("rq1", help="Tire degradation: baselines, PyMC model, checks")
     rq1.add_argument("--train", type=int, nargs="+", default=[2023, 2024])
@@ -70,6 +70,9 @@ def main(argv: list[str] | None = None) -> None:
     rq1.add_argument("--chains", type=int, default=4)
     rq1.add_argument("--seed", type=int, default=42)
     rq1.add_argument("--no-sensitivity", action="store_true")
+    rq2 = rq_sub.add_parser("rq2", help="Undercut: naive, IPW, DML, diagnostics, refutations")
+    rq2.add_argument("--seasons", type=int, nargs="+", default=[2023, 2024, 2025])
+    rq2.add_argument("--seed", type=int, default=42)
 
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -85,7 +88,7 @@ def main(argv: list[str] | None = None) -> None:
         from pitwall import research
 
         if args.target == "features":
-            build = research.build_feat_rq1
+            build = research.build_feat_rq1 if args.table == "rq1" else research.build_feat_rq2
             print({s: build(s) for s in args.season})
         elif args.target == "rq1":
             results = research.run_rq1(
@@ -98,6 +101,9 @@ def main(argv: list[str] | None = None) -> None:
                 sensitivity=not args.no_sensitivity,
             )
             print(json.dumps({k: results[k] for k in ("b0", "b1", "bayes")}, indent=2))
+        elif args.target == "rq2":
+            results = research.run_rq2(args.seasons, seed=args.seed)
+            print(json.dumps(results["primary"], indent=2, default=str))
         return
     if args.command == "maintain":
         print(json.dumps(pipelines.maintain(), indent=2))
