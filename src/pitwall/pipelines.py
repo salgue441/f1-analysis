@@ -5,16 +5,21 @@ Business logic lives in the layer modules; this module only wires I/O together.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 
+from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
 from pitwall.bronze.writer import append_to_bronze, make_batch_id
 from pitwall.config import get_settings
+from pitwall.gold import dims, facts
+from pitwall.gold.integrity import check_foreign_keys
+from pitwall.gold.writer import overwrite_season, overwrite_table
 from pitwall.ingestion import fastf1_loader
 from pitwall.ingestion.jolpica import ENDPOINTS, JolpicaClient
-from pitwall.paths import table_path
+from pitwall.paths import Layer, table_path
 from pitwall.quality import QualityReport, apply_expectations
 from pitwall.silver.merge import append_quarantine, merge_into_delta
 from pitwall.silver.registry import SPECS, target_table
@@ -101,3 +106,59 @@ def build_silver(name: str, season: int) -> QualityReport:
 
 def build_silver_laps(season: int) -> QualityReport:
     return build_silver("laps", season)
+
+
+# --- gold ------------------------------------------------------------------------------------
+
+
+def _read(layer: Layer, table: str) -> DataFrame:
+    return get_spark().read.format("delta").load(table_path(layer, table))
+
+
+def build_gold_dims() -> dict[str, int]:
+    """Rebuild all dimensions from silver (they are small and span seasons)."""
+    spark = get_spark()
+    seasons = get_settings().seasons
+    races, results, qualifying = (
+        _read("silver", "races"),
+        _read("silver", "results"),
+        _read("silver", "qualifying"),
+    )
+    observed = results.select("season", "round", "session_type").unionByName(
+        qualifying.select("season", "round", F.lit("Q").alias("session_type"))
+    )
+    tables = {
+        "dim_driver": dims.build_dim_driver(_read("silver", "drivers")),
+        "dim_constructor": dims.build_dim_constructor(_read("silver", "constructors")),
+        "dim_circuit": dims.build_dim_circuit(_read("silver", "circuits")),
+        "dim_compound": dims.build_dim_compound(spark),
+        "dim_date": dims.build_dim_date(
+            spark, dt.date(seasons.start, 1, 1), dt.date(seasons.end, 12, 31)
+        ),
+        "dim_session": dims.build_dim_session(races, results, observed),
+        "dim_driver_team": dims.build_dim_driver_team(dims.driver_team_entries(results, races)),
+    }
+    counts = {}
+    for name, df in tables.items():
+        overwrite_table(df, table_path("gold", name))
+        counts[name] = _read("gold", name).count()
+    log.info("gold dims: %s", counts)
+    return counts
+
+
+def build_fact_session_result(season: int) -> int:
+    in_season = F.col("season") == season
+    fact = facts.build_fact_session_result(
+        _read("silver", "results").filter(in_season),
+        _read("silver", "qualifying").filter(in_season),
+    )
+    check_foreign_keys(
+        fact,
+        {
+            "session_key": _read("gold", "dim_session"),
+            "driver_key": _read("gold", "dim_driver"),
+            "constructor_key": _read("gold", "dim_constructor"),
+        },
+    )
+    overwrite_season(get_spark(), fact, table_path("gold", "fact_session_result"), season)
+    return _read("gold", "fact_session_result").filter(in_season).count()
