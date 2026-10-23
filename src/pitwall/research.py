@@ -212,7 +212,9 @@ def run_rq1(
 
         for name in ["b0", "b1", "bayes"]:
             mlflow.log_metrics({f"{name}_{k}": v for k, v in results[name].items()})
-        mlflow.log_metrics({k: float(v) for k, v in results["diagnostics"].items()})
+        mlflow.log_metrics(
+            {k: float(v) for k, v in results["diagnostics"].items() if not isinstance(v, dict)}
+        )
         mlflow.log_metrics(results["hypotheses"])
         mlflow.log_artifacts(str(out), "rq1")
         _write_json(out / "results.json", results)
@@ -780,7 +782,12 @@ def run_eda(seasons: list[int]) -> dict[str, Any]:
     coverage = coverage.merge(scheduled, on="season", how="left")
     coverage.to_csv(out / "coverage.csv", index=False, float_format="%.4f")
 
-    clean = laps.filter(clean_lap_flag() & F.col("compound").isin("SOFT", "MEDIUM", "HARD"))
+    # Lap 1 is a standing start, not a pace lap (RQ1 excludes it too).
+    clean = laps.filter(
+        clean_lap_flag()
+        & F.col("compound").isin("SOFT", "MEDIUM", "HARD")
+        & (F.col("lap_number") > 1)
+    )
     sample = (
         clean.join(
             races.select("season", F.col("round").alias("event_round"), "circuit_id"),
@@ -796,8 +803,9 @@ def run_eda(seasons: list[int]) -> dict[str, Any]:
     for compound, color in [("SOFT", "#d62728"), ("MEDIUM", "#e6b800"), ("HARD", "#7f7f7f")]:
         part = sample[sample["compound"] == compound]
         axes[0].hist(
-            part["rel"].clip(0.97, 1.06),
+            part["rel"],
             bins=80,
+            range=(0.97, 1.06),
             histtype="step",
             color=color,
             label=compound,
