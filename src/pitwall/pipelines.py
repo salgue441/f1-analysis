@@ -13,14 +13,17 @@ from pyspark.sql import functions as F
 from pitwall.bronze.writer import append_to_bronze, make_batch_id
 from pitwall.config import get_settings
 from pitwall.ingestion import fastf1_loader
-from pitwall.ingestion.jolpica import JolpicaClient
+from pitwall.ingestion.jolpica import ENDPOINTS, JolpicaClient
 from pitwall.paths import table_path
 from pitwall.quality import QualityReport, apply_expectations
-from pitwall.silver import laps as silver_laps
 from pitwall.silver.merge import append_quarantine, merge_into_delta
+from pitwall.silver.registry import SPECS, target_table
 from pitwall.spark import get_spark
 
 log = logging.getLogger(__name__)
+
+# Jolpica endpoints loaded once per season (the rest are per round).
+SEASON_ENDPOINTS = [e for e, path in ENDPOINTS.items() if "{round}" not in path]
 
 
 def ingest_jolpica(season: int, endpoint: str, round_: int | None = None) -> int:
@@ -40,8 +43,23 @@ def ingest_jolpica(season: int, endpoint: str, round_: int | None = None) -> int
     written = append_to_bronze(
         df, f"jolpica_{endpoint}", "jolpica", batch_id, request, partition_by=["season"]
     )
-    log.info("bronze.jolpica_%s season=%s: %s pages", endpoint, season, written)
+    log.info("bronze.jolpica_%s season=%s round=%s: %s pages", endpoint, season, round_, written)
     return written
+
+
+def ingest_jolpica_season(season: int, rounds: list[int] | None = None) -> dict[str, int]:
+    """All season-level endpoints, plus per-round pit stops for `rounds` (default: all)."""
+    pages = {endpoint: ingest_jolpica(season, endpoint) for endpoint in SEASON_ENDPOINTS}
+    for round_ in rounds if rounds is not None else season_rounds(season):
+        pages["pitstops"] = pages.get("pitstops", 0) + ingest_jolpica(season, "pitstops", round_)
+    return pages
+
+
+def season_rounds(season: int) -> list[int]:
+    """Rounds of a season, read from silver.races (so ingest + build races first)."""
+    spark = get_spark()
+    races = spark.read.format("delta").load(table_path("silver", "races"))
+    return [r["round"] for r in races.filter(F.col("season") == season).orderBy("round").collect()]
 
 
 def ingest_fastf1_laps(season: int, round_: int, session_type: str = "R") -> int:
@@ -60,19 +78,26 @@ def ingest_fastf1_laps(season: int, round_: int, session_type: str = "R") -> int
     )
 
 
-def build_silver_laps(season: int) -> QualityReport:
+def build_silver(name: str, season: int) -> QualityReport:
+    """bronze -> quality gate -> MERGE into silver, for one season of one spec."""
+    spec = SPECS[name]
     settings = get_settings()
     spark = get_spark()
-    bronze = spark.read.format("delta").load(table_path("bronze", "fastf1_laps"))
-    typed = silver_laps.transform_laps(bronze.filter(F.col("season") == season))
+    bronze = spark.read.format("delta").load(table_path("bronze", spec.bronze_table))
+    typed = spec.transform(bronze.filter(F.col(spec.bronze_season_col) == season))
 
     valid, quarantined, report = apply_expectations(
-        typed, silver_laps.EXPECTATIONS, settings.quality.max_quarantine_ratio
+        typed, spec.expectations, settings.quality.max_quarantine_ratio
     )
+    target = target_table(spec)
     merge_into_delta(
-        spark, valid, table_path("silver", "laps"), silver_laps.NATURAL_KEY, partition_by=["season"]
+        spark, valid, table_path("silver", target), spec.natural_key, spec.partition_by
     )
     if report.quarantined_rows:
-        append_quarantine(quarantined, table_path("quarantine", "laps"))
-    log.info("silver.laps season=%s: %s", season, report)
+        append_quarantine(quarantined, table_path("quarantine", target))
+    log.info("silver.%s (%s) season=%s: %s", target, name, season, report)
     return report
+
+
+def build_silver_laps(season: int) -> QualityReport:
+    return build_silver("laps", season)

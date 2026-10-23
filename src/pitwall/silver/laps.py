@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from pyspark.sql import Column, DataFrame, Window
+from pyspark.sql import Column, DataFrame
 from pyspark.sql import functions as F
 
 from pitwall.quality import Expectation
+from pitwall.silver.common import latest_per_key
 
 NATURAL_KEY = ["season", "event_round", "session_type", "driver_number", "lap_number"]
 DRY_COMPOUNDS = ("SOFT", "MEDIUM", "HARD")
@@ -32,7 +33,6 @@ def _seconds(col: str) -> Column:
 
 
 def transform_laps(bronze: DataFrame) -> DataFrame:
-    latest_first = Window.partitionBy(*NATURAL_KEY).orderBy(F.col("_ingested_at").desc())
     typed = bronze.select(
         F.col("season").cast("int").alias("season"),
         F.col("event_round").cast("int").alias("event_round"),
@@ -58,12 +58,6 @@ def transform_laps(bronze: DataFrame) -> DataFrame:
         F.col("_ingested_at"),
         F.col("_batch_id").alias("_source_batch_id"),
     )
-    return (
-        typed
-        # TrackStatus lists every status seen during the lap; "1" alone = fully green.
-        .withColumn("is_green_flag", F.col("track_status") == F.lit("1"))
-        .withColumn("_rn", F.row_number().over(latest_first))
-        .filter(F.col("_rn") == 1)
-        .drop("_rn")
-        .withColumn("_updated_at", F.current_timestamp())
-    )
+    # TrackStatus lists every status seen during the lap; "1" alone = fully green.
+    typed = typed.withColumn("is_green_flag", F.col("track_status") == F.lit("1"))
+    return latest_per_key(typed, NATURAL_KEY).withColumn("_updated_at", F.current_timestamp())
