@@ -22,11 +22,14 @@ def merge_into_delta(
         return
 
     condition = " AND ".join(f"t.{k} <=> s.{k}" for k in keys)
+    # Latest ingestion wins regardless of run order: rebuilding an older season must not
+    # overwrite an entity row that a later batch (e.g. another season's) already updated.
+    newer = "s._ingested_at >= t._ingested_at" if "_ingested_at" in df.columns else None
     (
         DeltaTable.forPath(spark, path)
         .alias("t")
         .merge(df.alias("s"), condition)
-        .whenMatchedUpdateAll()
+        .whenMatchedUpdateAll(condition=newer)
         .whenNotMatchedInsertAll()
         .execute()
     )
