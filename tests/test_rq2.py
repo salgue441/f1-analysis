@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pitwall.features.pit_decision import build_feat_pit_decision
+from pitwall.features.pit_decision import build_feat_pit_cycle, build_feat_pit_decision
 from pitwall.models import causal
 
 LAP_SCHEMA = (
@@ -43,14 +43,14 @@ def _race_laps(d_pit, r_pit, laps=30, sc_lap=None, swap_after=None):
     return rows
 
 
-def _build(spark, rows):
+def _build(spark, rows, builder=build_feat_pit_decision):
     laps = spark.createDataFrame(rows, LAP_SCHEMA)
     sessions = spark.createDataFrame(
         [(2024, 1, "R", "bahrain", 30)],
         "season int, round int, session_type string, circuit_id string, scheduled_laps int",
     )
     pit_loss = spark.createDataFrame([("bahrain", 22.0)], "circuit_id string, pit_loss_s double")
-    return build_feat_pit_decision(laps, sessions, pit_loss)
+    return builder(laps, sessions, pit_loss)
 
 
 def test_units_treatment_and_outcome(spark):
@@ -136,3 +136,24 @@ def test_e_value_and_refuter():
     df = _confounded(n_races=30, per_race=30, effect=0.2, seed=1)
     ref = causal.permuted_treatment_refuter(df, "outcome_ahead_after_cycle", n_perm=5)
     assert abs(ref["mean_effect"]) < 0.08
+
+
+def test_cycle_design_one_unit_per_pair_and_cycle(spark):
+    # b (behind) stops on lap 12, a on lap 14: one cycle, b went first, b ends up ahead.
+    units = _build(
+        spark, _race_laps(d_pit=12, r_pit=14, swap_after=15), build_feat_pit_cycle
+    ).toPandas()
+    assert len(units) == 1
+    row = units.iloc[0]
+    assert (row["driver_id"], row["rival_id"], row["decision_lap"]) == ("b", "a", 12)
+    assert (
+        row["treated"] == 1 and row["outcome_lap"] == 15 and row["outcome_ahead_after_cycle"] == 1
+    )
+
+    # Rival stops first: a control unit, decided on the rival's stop lap.
+    units = _build(spark, _race_laps(d_pit=14, r_pit=12), build_feat_pit_cycle).toPandas()
+    assert list(units["treated"]) == [0] and list(units["decision_lap"]) == [12]
+
+    # Stops too far apart are not a shared cycle.
+    far = _build(spark, _race_laps(d_pit=10, r_pit=22), build_feat_pit_cycle).toPandas()
+    assert far.empty

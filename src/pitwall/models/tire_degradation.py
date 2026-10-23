@@ -277,18 +277,20 @@ def export_posterior(draws: dict) -> pd.DataFrame:
 def predictive_draws(
     draws: dict, split: StintSplit, scaler: TempScaler, seed: int = 0
 ) -> np.ndarray:
-    """Posterior predictive forecasts of the target laps: anchored shape + Student-t noise.
+    """Posterior predictive forecasts of the target laps.
 
-    Anchor and target rows are drawn together, so an unseen driver's (or circuit's) fresh
-    deviation is the same in both.
+    Lap noise is simulated on the anchor laps too: the observed anchor mean is itself noisy,
+    so the level it sets is uncertain (variance ~ sigma^2 / n_anchor), and leaving that out
+    makes intervals too narrow. Anchor and target rows are drawn together, so an unseen
+    driver's (or circuit's) fresh deviation is the same in both.
     """
     both = pd.concat([split.anchor, split.target], ignore_index=True)
     shape = shape_draws(draws, both, scaler, seed)
-    n_anchor = len(split.anchor)
-    forecast = anchored(split, shape[:, :n_anchor], shape[:, n_anchor:])
     rng = np.random.default_rng(seed + 1)
-    noise = rng.standard_t(draws["nu"][:, None], size=forecast.shape) * draws["sigma"][:, None]
-    return forecast + noise
+    noise = rng.standard_t(draws["nu"][:, None], size=shape.shape) * draws["sigma"][:, None]
+    shape = shape + noise
+    n_anchor = len(split.anchor)
+    return anchored(split, shape[:, :n_anchor], shape[:, n_anchor:])
 
 
 def hypothesis_tests(draws: dict) -> dict[str, float]:
