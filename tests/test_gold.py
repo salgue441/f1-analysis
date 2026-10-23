@@ -188,3 +188,14 @@ def test_merge_keeps_latest_ingestion_regardless_of_run_order(spark, tmp_path):
     merge_into_delta(spark, new, path, ["driver_id"])
     merge_into_delta(spark, old, path, ["driver_id"])  # rebuilding an older season
     assert spark.read.format("delta").load(path).first().code == "VER"
+
+
+def test_season_overwrite_accepts_new_columns(spark, tmp_path):
+    path = str(tmp_path / "evolving")
+    overwrite_season(
+        spark, spark.createDataFrame([(2024, 1.0)], "season int, a double"), path, 2024
+    )
+    wider = spark.createDataFrame([(2025, 2.0, 3.0)], "season int, a double, b double")
+    overwrite_season(spark, wider, path, 2025)
+    df = spark.read.format("delta").load(path)
+    assert set(df.columns) == {"season", "a", "b"} and df.count() == 2

@@ -24,5 +24,7 @@ def overwrite_season(spark: SparkSession, df: DataFrame, path: str, season: int)
         df.write.format("delta")
         .mode("overwrite")
         .option("replaceWhere", f"season = {int(season)}")
+        # New columns are allowed (additive evolution); a changed type still fails.
+        .option("mergeSchema", "true")
         .save(path)
     )
