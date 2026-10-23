@@ -124,9 +124,19 @@ Filters: race sessions, green flag, not pit in/out laps, `is_accurate`, dry comp
 
 Only information available at lap *t* goes into covariates. Pit cycles disrupted by an SC/VSC are excluded (post-treatment shocks).
 
-### `feat_race_sim_params` (RQ3) — grain: race
+### `feat_race_sim_params` (RQ3) — grain: race, and `feat_race_sim_cars` — grain: driver × race
 
-Pit loss distribution, SC/VSC hazard per lap (historical by circuit), starting grid, degradation posterior sample references.
+Only pre-race information:
+
+| Column | Definition |
+|---|---|
+| `race_laps`, `base_lap_s` | scheduled distance; reference lap (pole × 1.07), used for SC lap times |
+| `pit_loss_mean_s`, `pit_loss_sd_s` | circuit median of (in-lap + out-lap − 2 × clean lap) from **earlier seasons**, shrunk toward the all-circuit median |
+| `sc_hazard_per_lap` | SC + VSC deployments per lap at the circuit from earlier seasons, shrunk toward the global rate |
+| `grid`, `pace_offset_s` (cars) | race grid; qualifying gap to pole as the pace signal |
+| `strategy` (cars) | the stints actually run (`MEDIUM:20;HARD:37`): the backtest input and the decision-analysis baseline |
+
+Degradation and fuel draws are joined from `features.rq1_degradation_posterior` (circuit × compound × draw).
 
 ### `feat_prerace` (RQ4) — grain: driver × race
 
