@@ -8,6 +8,11 @@ from pyspark.sql import functions as F
 _NULL_TOKEN = "__null__"
 
 
-def surrogate_key(*cols: str) -> Column:
-    """xxhash64 over the natural key columns; stable across rebuilds."""
-    return F.xxhash64(*[F.coalesce(F.col(c).cast("string"), F.lit(_NULL_TOKEN)) for c in cols])
+def surrogate_key(*cols: str | Column) -> Column:
+    """xxhash64 over the natural key columns; stable across rebuilds.
+
+    Hashes values, not names, so `round` and `event_round` holding the same number give the
+    same key.
+    """
+    exprs = [F.col(c) if isinstance(c, str) else c for c in cols]
+    return F.xxhash64(*[F.coalesce(e.cast("string"), F.lit(_NULL_TOKEN)) for e in exprs])

@@ -83,7 +83,7 @@ erDiagram
 |---|---|---|---|---|
 | `fact_lap` | driver × lap × session | `season, round, session_type, driver_number, lap_number` | lap/sector times, tyre life, position, gap, flags, weather at lap | `season` |
 | `fact_stint` | driver × stint × session | `… driver_number, stint_number` | start/end lap, compound, laps, mean/median green-flag pace, raw degradation slope | `season` |
-| `fact_pit_stop` | driver × stop × race | `season, round, driver_id, stop_number` | lap, stationary duration, pit-lane duration, under SC/VSC flag | `season` |
+| `fact_pit_stop` | driver × stop × race | `season, round, driver_id, stop_number` | lap, pit-lane duration, compound before/after, position before/after, under SC/VSC/red flag. Stationary time is not published by any free source, so it isn't modeled | `season` |
 | `fact_session_result` | driver × session | `season, round, session_type, driver_id` | grid, finish position, points, status, classified flag | `season` |
 | `fact_telemetry_sample` | driver × sample × session | `… driver_number, session_time_s` | speed, rpm, gear, throttle, brake, drs, x, y, z, distance | `season, event_round, session_type` |
 
@@ -93,8 +93,9 @@ erDiagram
 
 | Table | Purpose |
 |---|---|
-| `driver_id_map` | Per season: `driver_id` (Jolpica) ↔ `code` ↔ `driver_number` (FastF1/OpenF1). Tested for 1:1 within season/session. |
-| `race_control` | Flags, SC/VSC periods with start/end session time; used to derive `is_green_flag` and SC events for RQ3 |
+| `driver_id_map` | Per race weekend (`season, round, driver_number`): `driver_id` (Jolpica) ↔ `code` ↔ car number, built from Jolpica entry lists. Checked 1:1 in both directions on every build. |
+| `race_control` | Track-status periods `[start_s, end_s)` (green, SC, VSC, VSC ending, red flag) in session time; used for per-lap track status, `is_neutralized` and SC events for RQ3 |
+| `weather`, `telemetry_car`, `telemetry_pos` | Typed OpenF1 (or FastF1) samples in session time; all lap-level silver tables have the same schema whichever source fed them ([ADR-0006](adr/0006-openf1-as-lap-data-source.md)) |
 
 ## Feature tables (one per research question)
 
@@ -123,9 +124,19 @@ Filters: race sessions, green flag, not pit in/out laps, `is_accurate`, dry comp
 
 Only information available at lap *t* goes into covariates. Pit cycles disrupted by an SC/VSC are excluded (post-treatment shocks).
 
-### `feat_race_sim_params` (RQ3) — grain: race
+### `feat_race_sim_params` (RQ3) — grain: race, and `feat_race_sim_cars` — grain: driver × race
 
-Pit loss distribution, SC/VSC hazard per lap (historical by circuit), starting grid, degradation posterior sample references.
+Only pre-race information:
+
+| Column | Definition |
+|---|---|
+| `race_laps`, `base_lap_s` | scheduled distance; reference lap (pole × 1.07), used for SC lap times |
+| `pit_loss_mean_s`, `pit_loss_sd_s` | circuit median of (in-lap + out-lap − 2 × clean lap) from **earlier seasons**, shrunk toward the all-circuit median |
+| `sc_hazard_per_lap` | SC + VSC deployments per lap at the circuit from earlier seasons, shrunk toward the global rate |
+| `grid`, `pace_offset_s` (cars) | race grid; qualifying gap to pole as the pace signal |
+| `strategy` (cars) | the stints actually run (`MEDIUM:20;HARD:37`): the backtest input and the decision-analysis baseline |
+
+Degradation and fuel draws are joined from `features.rq1_degradation_posterior` (circuit × compound × draw).
 
 ### `feat_prerace` (RQ4) — grain: driver × race
 

@@ -3,14 +3,14 @@
 FROM python:3.11-slim-bookworm
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends openjdk-17-jre-headless procps make git \
+    && apt-get install -y --no-install-recommends openjdk-17-jre-headless procps make git libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace
 
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN pip install --no-cache-dir -e ".[ds,dev]"
+RUN pip install --no-cache-dir -e ".[ds,causal,dev]"
 
 # Expose the pip-installed Spark distribution at a stable path for spark-class.
 RUN ln -s "$(python -c 'import os, pyspark; print(os.path.dirname(pyspark.__file__))')" /opt/spark

@@ -28,6 +28,13 @@ class JolpicaSettings(BaseModel):
     max_retries: int = 5
 
 
+class OpenF1Settings(BaseModel):
+    base_url: str = "https://api.openf1.org/v1"
+    min_interval_s: float = 2.1
+    max_retries: int = 5
+    session_types: list[str] = Field(default_factory=lambda: ["R"])
+
+
 class FastF1Settings(BaseModel):
     cache_dir: str
     session_types: list[str] = Field(default_factory=lambda: ["R"])
@@ -49,7 +56,10 @@ class MlflowSettings(BaseModel):
 class Settings(BaseModel):
     lakehouse_root: str
     seasons: SeasonRange
+    # Lap-level data (laps, tyres, weather, telemetry) only exists from 2023 (ADR-0006).
+    lap_seasons: SeasonRange
     jolpica: JolpicaSettings
+    openf1: OpenF1Settings = Field(default_factory=OpenF1Settings)
     fastf1: FastF1Settings
     spark: SparkSettings = Field(default_factory=SparkSettings)
     quality: QualitySettings = Field(default_factory=QualitySettings)

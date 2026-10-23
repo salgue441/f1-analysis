@@ -1,0 +1,87 @@
+{
+  "coverage": [
+    {
+      "laps": 24377,
+      "races": 22,
+      "races_scheduled": 22,
+      "season": 2023,
+      "share_accurate": 0.9316979119661977,
+      "share_clean": 0.8759076178364852,
+      "share_green": 0.9447019731714321,
+      "share_no_time": 0.004840628461254461,
+      "share_no_weather": 0.0007384009517167823,
+      "share_unknown_compound": 0.004102227509537679
+    },
+    {
+      "laps": 26596,
+      "races": 24,
+      "races_scheduled": 24,
+      "season": 2024,
+      "share_accurate": 0.9347646262595879,
+      "share_clean": 0.8873514814257784,
+      "share_green": 0.953526846142277,
+      "share_no_time": 0.0032335689577380057,
+      "share_no_weather": 0.0005263949466085125,
+      "share_unknown_compound": 0.00203038050834712
+    },
+    {
+      "laps": 26265,
+      "races": 24,
+      "races_scheduled": 24,
+      "season": 2025,
+      "share_accurate": 0.9353893013516086,
+      "share_clean": 0.866057490957548,
+      "share_green": 0.9246145059965734,
+      "share_no_time": 0.002055968018275271,
+      "share_no_weather": 0.0007233961545783362,
+      "share_unknown_compound": 0.001675233200076147
+    }
+  ],
+  "pit_loss_highest": {
+    "imola": 28.16,
+    "losail": 28.01,
+    "silverstone": 29.83
+  },
+  "pit_loss_iqr_s": [
+    20.859999999999985,
+    25.943000000000012
+  ],
+  "pit_loss_lowest": {
+    "monaco": 18.93,
+    "spa": 19.92,
+    "villeneuve": 20.21
+  },
+  "pit_loss_median_s": 23.110000000000014,
+  "seasons": [
+    2023,
+    2024,
+    2025
+  ],
+  "stint_laps_by_compound": {
+    "HARD": {
+      "50%": 25.0,
+      "count": 1412.0,
+      "max": 78.0,
+      "mean": 25.82
+    },
+    "MEDIUM": {
+      "50%": 18.0,
+      "count": 1496.0,
+      "max": 78.0,
+      "mean": 18.61
+    },
+    "SOFT": {
+      "50%": 13.0,
+      "count": 659.0,
+      "max": 50.0,
+      "mean": 12.86
+    }
+  },
+  "stops_share": {
+    "0": 0.036523009495982466,
+    "1": 0.37034331628926226,
+    "2": 0.41051862673484296,
+    "3": 0.11176040905770636,
+    "4": 0.07085463842220599
+  }
+}

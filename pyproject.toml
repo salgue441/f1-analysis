@@ -34,6 +34,9 @@ ds = [
     "jupyterlab>=4",
     "streamlit>=1.38",
     "plotly>=5.20",
+    "nutpie>=0.13",
+    "statsmodels>=0.14",
+    "deltalake>=0.18",
 ]
 causal = [
     "econml>=0.15",

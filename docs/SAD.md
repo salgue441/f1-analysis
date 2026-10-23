@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Project** | Pitwall: Quantifying F1 race strategy under uncertainty |
-| **Version** | 0.1 (foundation) |
+| **Version** | 0.2 (lap source: OpenF1) |
 | **Status** | Draft |
 | **Template** | Loosely follows [arc42](https://arc42.org) |
 | **Related docs** | [Research plan](research-plan.md) · [Data model](data-model.md) · [Roadmap](roadmap.md) · [ADRs](adr/) |
@@ -54,7 +54,7 @@ The data platform (lakehouse, pipelines, data model) exists **to serve these que
 | Hardware | One laptop (Windows + Docker/WSL2) | Spark runs in Docker; sampled dev datasets |
 | Data licensing | Jolpica / FastF1 / OpenF1 data is unofficial and for non-commercial use | Portfolio/educational use only; no redistribution of raw data in the repo |
 | API limits | Jolpica: ~4 req/s burst, ~500 req/hour | Client-side rate limiter; cache raw responses in bronze |
-| Data coverage | Telemetry and detailed timing only from 2018 (FastF1); OpenF1 from 2023 | RQ1–RQ3 scoped to 2018+; historical results back to 1950 used for dimensions/priors only |
+| Data coverage | Lap-level timing, tyres and telemetry only from 2023 (OpenF1; the FastF1 archive needs an F1 TV login since Oct 2026) | RQ1–RQ3 scoped to 2023–2025; results 2018+ used for dimensions/history/priors ([ADR-0006](adr/0006-openf1-as-lap-data-source.md)) |
 | Live data | OpenF1 real-time access may require an account | Streaming is an optional phase |
 
 ---
@@ -66,8 +66,8 @@ The data platform (lakehouse, pipelines, data model) exists **to serve these que
 ```mermaid
 flowchart LR
     J[Jolpica-F1 API<br/>results, standings, schedule] --> P
-    F[FastF1 library<br/>laps, stints, telemetry, weather] --> P
-    O[OpenF1 API<br/>historical + live timing] -.optional.-> P
+    O[OpenF1 API<br/>laps, stints, weather, telemetry 2023+] --> P
+    F[FastF1 library<br/>needs F1 TV login since Oct 2026] -.inactive.-> P
     P[[Pitwall platform]] --> W[Write-up / blog]
     P --> A[Streamlit strategy explorer]
     P --> M[MLflow: experiments & models]
@@ -80,8 +80,8 @@ flowchart LR
 | Source | Access | Grain | Volume (2018 onward) | Refresh |
 |---|---|---|---|---|
 | Jolpica-F1 (`api.jolpi.ca/ergast/f1`) | REST/JSON, paginated (`limit`/`offset`) | race result, qualifying, pit stop, driver, constructor, circuit | small (10⁵ rows) | after each race weekend |
-| FastF1 | Python lib (wraps F1 live timing), local cache | lap, stint, car telemetry sample, position sample, weather sample | large (10⁸–10⁹ telemetry rows) | after each session |
-| OpenF1 (`api.openf1.org/v1`) | REST/JSON, filter by `session_key` | car data, intervals, race control, pit | medium | live / post-session |
+| OpenF1 (`api.openf1.org/v1`) | REST/JSON, filter by `session_key` (+ `driver_number` for telemetry), ~30 req/min | lap, stint, pit, position, race control, weather, car telemetry, location (2023+) | large (10⁸ telemetry rows) | post-session |
+| FastF1 (inactive, [ADR-0006](adr/0006-openf1-as-lap-data-source.md)) | Python lib over the F1 timing archive, which needs an F1 TV login since Oct 2026 | lap, stint, telemetry, weather (2018+) | large | — |
 
 **Out of scope:** betting odds, team radio audio, onboard video, official FIA documents.
 
@@ -97,6 +97,7 @@ flowchart LR
 | Compute | **PySpark** for ETL, telemetry features and simulation; pandas/PyMC for single-node modeling | [ADR-0003](adr/0003-spark-for-scale-single-node-for-modeling.md) |
 | Orchestration | **Dagster** assets (each table = one asset, partitioned by season) | [ADR-0004](adr/0004-dagster-orchestration.md) |
 | Modeling | **PyMC** (Bayesian), **EconML/DoWhy** (causal), **MLflow** tracking | [ADR-0005](adr/0005-modeling-stack.md) |
+| Lap-level source | **OpenF1** (2023+); FastF1 kept as an inactive alternative | [ADR-0006](adr/0006-openf1-as-lap-data-source.md) |
 | Validation | Temporal splits by season/race; never random splits | [Research plan §2](research-plan.md#2-cross-cutting-methodology) |
 
 ---
@@ -147,15 +148,21 @@ src/pitwall/
 ├── config.py            # typed settings (conf/*.yaml + env overrides)
 ├── spark.py             # SparkSession factory (Delta, AQE, UTC)
 ├── paths.py             # table path conventions per layer
-├── ingestion/           # source clients → bronze
-├── bronze/              # generic bronze writer (+ ingestion metadata)
-├── silver/              # cleaning, typing, dedup, conformance
-├── gold/                # dimensions, facts (incl. SCD2)
-├── features/            # ML feature tables built from gold
-├── quality/             # expectations + quarantine
-├── models/              # RQ1 tire_degradation, RQ2 causal, RQ4 predict
-├── simulation/          # RQ3 Monte Carlo race simulator
-├── orchestration/       # Dagster asset definitions
+├── asof.py              # backward as-of join (point-in-time correct by construction)
+├── ingestion/           # Jolpica + OpenF1 clients (rate-limited), FastF1 loader (inactive)
+├── bronze/              # generic append-only writer (+ ingestion metadata)
+├── silver/              # per-source transforms, spec registry, MERGE, driver_id_map
+├── gold/                # dims (incl. SCD2), facts, keys, integrity checks, writers
+├── features/            # one builder per RQ: tire_degradation, pit_decision, race_sim_params
+├── quality/             # expectations, quarantine, DQ run log
+├── models/              # RQ1 Bayesian model + baselines + evaluation; RQ2 causal estimators
+├── simulation/          # RQ3 field simulator, strategies, scoring, Spark distribution
+├── orchestration/       # Dagster assets, jobs, schedules
+├── pipelines.py         # data-platform I/O wiring (CLI + Dagster share it)
+├── research.py          # feature builds + end-to-end RQ runs (MLflow, reports/)
+├── tracking.py          # MLflow runs with git SHA, Delta versions, seed, config
+├── serving.py           # Spark-free reads (delta-rs) for the Streamlit app
+├── maintenance.py       # OPTIMIZE / Z-order / VACUUM, skew diagnostics
 └── cli.py               # `pitwall ...` entry point
 ```
 
@@ -177,8 +184,8 @@ src/pitwall/
 
 | Bronze | Silver | Gold | Features |
 |---|---|---|---|
-| `jolpica_results`, `jolpica_qualifying`, `jolpica_pitstops`, `jolpica_drivers`, `jolpica_constructors`, `jolpica_circuits`, `jolpica_races` | `results`, `qualifying`, `pit_stops`, `drivers`, `constructors`, `circuits`, `races` | `dim_driver`, `dim_constructor`, `dim_circuit`, `dim_session`, `dim_compound`, `dim_date`, `dim_driver_team` (SCD2) | `feat_tire_degradation` (RQ1) |
-| `fastf1_laps`, `fastf1_car_data`, `fastf1_pos_data`, `fastf1_weather`, `fastf1_race_control` | `laps`, `telemetry_car`, `telemetry_pos`, `weather`, `race_control`, `driver_id_map` | `fact_lap`, `fact_stint`, `fact_pit_stop`, `fact_session_result`, `fact_telemetry_sample` | `feat_pit_decision` (RQ2), `feat_race_sim_params` (RQ3), `feat_prerace` (RQ4) |
+| `jolpica_results`, `jolpica_qualifying`, `jolpica_pitstops`, `jolpica_drivers`, `jolpica_constructors`, `jolpica_circuits`, `jolpica_races` | `results`, `qualifying`, `pit_stops`, `drivers`, `constructors`, `circuits`, `races` | `dim_driver`, `dim_constructor`, `dim_circuit`, `dim_session`, `dim_compound`, `dim_date`, `dim_driver_team` (SCD2) | `feat_tire_degradation` (RQ1), `rq1_degradation_posterior` (RQ1 → RQ3) |
+| `openf1_laps`, `openf1_stints`, `openf1_pit`, `openf1_position`, `openf1_race_control`, `openf1_weather`, `openf1_drivers`, `openf1_car_data`, `openf1_location` (`fastf1_*` inactive) | `laps`, `telemetry_car`, `telemetry_pos`, `weather`, `race_control`, `driver_id_map` | `fact_lap`, `fact_stint`, `fact_pit_stop`, `fact_session_result`, `fact_telemetry_sample` | `feat_pit_cycle` + `feat_pit_decision` (RQ2), `feat_race_sim_params` + `feat_race_sim_cars` (RQ3), `feat_prerace` (RQ4, not built) |
 
 Full schemas, grains and the ERD are in [data-model.md](data-model.md).
 
@@ -282,7 +289,8 @@ Only `conf/<env>.yaml` changes (`lakehouse_root`, `spark.master`, credentials vi
 ### 9.2 Idempotency & incrementality
 
 - Bronze: append + deterministic `_batch_id = hash(source, request, content)`.
-- Silver: `MERGE` on natural key; latest `_ingested_at` wins.
+- Silver: `MERGE` on natural key; a matched row is only updated by a batch ingested at the same time or later, so "latest ingestion wins" regardless of run order. Telemetry replaces whole session partitions instead (dynamic partition overwrite).
+- Checked: rebuilding a season from bronze reproduces every silver and gold table bit-for-bit (`pitwall fingerprints`: row count + checksum per table).
 - Gold/features: `replaceWhere` per season partition.
 
 ### 9.3 Point-in-time correctness (leakage prevention)
@@ -346,6 +354,7 @@ See [research-plan.md](research-plan.md) for the full plan. Architectural implic
 | Risk | Impact | Mitigation |
 |---|---|---|
 | Unofficial data sources change/disappear (Ergast already shut down in 2024) | High | Bronze keeps raw copies; source clients are isolated behind interfaces |
+| FastF1 archive closed behind F1 TV login (Oct 2026) | High (happened) | Switched to OpenF1 with identical silver schemas; FastF1 specs kept ([ADR-0006](adr/0006-openf1-as-lap-data-source.md)) |
 | Confounding in RQ2 can't be fully removed | High (validity) | State assumptions, sensitivity analysis, placebo tests, report as "evidence", not proof |
 | Safety cars and weather dominate outcomes | Medium | Model as explicit stochastic events in RQ3; exclude/flag affected laps in RQ1 |
 | Spark on Windows filesystem issues | Medium | Always run Spark inside Docker/WSL2 |
