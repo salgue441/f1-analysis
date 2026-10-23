@@ -178,3 +178,13 @@ def test_merge_and_season_overwrite_are_idempotent(spark, tmp_path):
     overwrite_season(spark, results, gold, 2018)
     df = spark.read.format("delta").load(gold)
     assert df.filter("season = 2024").count() == 2 and df.filter("season = 2018").count() == 1
+
+
+def test_merge_keeps_latest_ingestion_regardless_of_run_order(spark, tmp_path):
+    schema = "driver_id string, code string, _ingested_at timestamp"
+    new = spark.createDataFrame([("ver", "VER", dt.datetime(2025, 12, 1))], schema)
+    old = spark.createDataFrame([("ver", "OLD", dt.datetime(2024, 12, 1))], schema)
+    path = str(tmp_path / "drivers")
+    merge_into_delta(spark, new, path, ["driver_id"])
+    merge_into_delta(spark, old, path, ["driver_id"])  # rebuilding an older season
+    assert spark.read.format("delta").load(path).first().code == "VER"

@@ -139,11 +139,16 @@ def build_fact_stint(fact_lap: DataFrame) -> DataFrame:
             F.max("lap_number").alias("end_lap"),
             F.count(F.lit(1)).alias("laps"),
             F.min("tyre_life_laps").alias("start_tyre_life_laps"),
-            F.first("fresh_tyre", ignorenulls=True).alias("fresh_tyre"),
+            # max, not first: first() depends on row order, and rebuilds must be identical.
+            F.max("fresh_tyre").alias("fresh_tyre"),
             F.count(clean_y).alias("clean_laps"),
-            F.mean(clean_y).alias("mean_clean_lap_s"),
+            # Rounded: floating-point sums depend on aggregation order, and rebuilds must be
+            # bit-identical for the fingerprint check (SAD §11).
+            F.round(F.mean(clean_y), 6).alias("mean_clean_lap_s"),
             F.percentile_approx(clean_y, 0.5).alias("median_clean_lap_s"),
-            (F.covar_samp(clean_t, clean_y) / F.var_samp(clean_t)).alias("raw_deg_slope_s_per_lap"),
+            F.round(F.covar_samp(clean_t, clean_y) / F.var_samp(clean_t), 6).alias(
+                "raw_deg_slope_s_per_lap"
+            ),
         )
     )
     stints = stints.withColumn("compound", F.coalesce(F.col("compound"), F.lit("UNKNOWN")))
