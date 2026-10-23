@@ -809,6 +809,236 @@ def run_rq3(
     return res
 
 
+# --- RQ4 -------------------------------------------------------------------------------------
+
+RQ4_TARGETS = {"podium": 3, "scored_points": 10}  # target -> positions it covers (rank model)
+
+
+def build_feat_rq4(season: int) -> int:
+    """features.feat_prerace for `season`; form windows read every earlier season."""
+    from pitwall.features.prerace import build_feat_prerace
+
+    spark = get_spark()
+    upto = F.col("season") <= season
+    feat = build_feat_prerace(
+        _read("gold", "fact_session_result").filter(upto),
+        _read("gold", "dim_session").filter(upto),
+        _read("gold", "dim_constructor"),
+    ).filter(F.col("season") == season)
+    path = table_path("features", "feat_prerace")
+    overwrite_season(spark, feat, path, season)
+    return _read("features", "feat_prerace").filter(F.col("season") == season).count()
+
+
+def _rq4_walk_forward(feat: pd.DataFrame, first_season: int, seed: int) -> pd.DataFrame:
+    """Out-of-sample predictions for every race from `first_season`, each model refit on all
+    earlier races (rolling origin)."""
+    from pitwall.models.prerace import Gbm, GridLogit, PlackettLuce
+
+    rng = np.random.default_rng(seed)
+    orders = sorted(feat.loc[feat["season"] >= first_season, "race_order"].unique())
+    out = []
+    for order in orders:
+        train, race = feat[feat["race_order"] < order], feat[feat["race_order"] == order].copy()
+        pl = PlackettLuce().fit(train)
+        probs = pl.position_probs(race, 20_000, rng)
+        for target, top in RQ4_TARGETS.items():
+            y = train[target].to_numpy(int)
+            race[f"{target}__grid"] = GridLogit().fit(train, y).predict(race)
+            race[f"{target}__gbm_raw"] = Gbm(seed).fit(train, y).predict(race)
+            race[f"{target}__plackett_luce"] = probs[:, :top].sum(axis=1)
+        out.append(race)
+        log.info("RQ4 walk-forward %s done", race["race_id"].iloc[0])
+    return pd.concat(out, ignore_index=True)
+
+
+def _rq4_calibrate(preds: pd.DataFrame, first_season: int) -> pd.DataFrame:
+    """Calibrated predictions: before each race, fit on earlier out-of-sample raw ones."""
+    from pitwall.models.prerace import Calibrator
+
+    preds = preds.copy()
+    for target in RQ4_TARGETS:
+        for method in ("isotonic", "platt"):
+            col = f"{target}__gbm_{method}"
+            preds[col] = np.nan
+            for order in preds.loc[preds["season"] >= first_season, "race_order"].unique():
+                past, now = preds["race_order"] < order, preds["race_order"] == order
+                cal = Calibrator(method).fit(
+                    preds.loc[past, f"{target}__gbm_raw"].to_numpy(),
+                    preds.loc[past, target].to_numpy(int),
+                )
+                preds.loc[now, col] = cal.predict(preds.loc[now, f"{target}__gbm_raw"].to_numpy())
+    return preds
+
+
+def _rq4_scores(preds: pd.DataFrame, models: list[str], rng: np.random.Generator) -> dict:
+    from pitwall.models.prerace import brier, log_loss
+    from pitwall.simulation import scoring
+
+    res: dict[str, Any] = {}
+    for target in RQ4_TARGETS:
+        y = preds[target].to_numpy(float)
+        base = brier(preds[f"{target}__grid"].to_numpy(), y)
+        res[target] = {"n": len(preds), "base_rate": float(y.mean())}
+        for m in models:
+            p = preds[f"{target}__{m}"].to_numpy()
+            b = brier(p, y)
+            diff = pd.Series(base - b).groupby(preds["race_id"].to_numpy()).mean().to_numpy()
+            res[target][m] = {
+                "brier": float(b.mean()),
+                "log_loss": float(log_loss(p, y).mean()),
+                "ece": scoring.expected_calibration_error(scoring.reliability(p, y)),
+                "brier_gain_vs_grid": float(base.mean() - b.mean()),
+                "brier_gain_ci": _bootstrap_ci(diff, rng),
+                "share_races_better": float((diff > 0).mean()),
+                "mean_sum_per_race": float(
+                    pd.Series(p).groupby(preds["race_id"].to_numpy()).sum().mean()
+                ),
+            }
+    return res
+
+
+def _rq4_simulator_probs(season: int, pace_scale: float, noise: float, n_sims: int, seed: int):
+    """RQ3 simulator P(podium) / P(points) for `season`, same frozen pace settings."""
+    from pitwall.features.race_sim_params import PaceSettings
+    from pitwall.simulation import distributed as dist
+
+    inputs = load_race_inputs(season, PaceSettings(pace_scale, noise))
+    counts = dist.simulate_on_spark(get_spark(), [ri.setup for ri in inputs], n_sims, seed=seed)
+    rows = []
+    for ri in inputs:
+        probs = dist.position_probs(counts, ri.setup.race_id, len(ri.driver_ids))
+        for i, driver in enumerate(ri.driver_ids):
+            rows.append(
+                {
+                    "race_id": ri.setup.race_id,
+                    "driver_id": driver,
+                    "podium__simulator": float(probs[i, :3].sum()),
+                    "scored_points__simulator": float(probs[i, :10].sum()),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _plot_rq4(preds: pd.DataFrame, models: list[str], path: Path) -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from pitwall.simulation import scoring
+
+    labels = {
+        "grid": "Grid-only logistic",
+        "gbm_raw": "Boosting, raw",
+        "gbm_isotonic": "Boosting + isotonic",
+        "gbm_platt": "Boosting + Platt",
+        "plackett_luce": "Plackett-Luce",
+        "simulator": "RQ3 simulator",
+    }
+    fig, axes = plt.subplots(1, 2, figsize=(11, 5))
+    for ax, target in zip(axes, RQ4_TARGETS, strict=True):
+        ax.plot([0, 1], [0, 1], color="0.7", lw=1, ls="--")
+        for m in models:
+            rel = scoring.reliability(preds[f"{target}__{m}"].to_numpy(), preds[target].to_numpy())
+            rel = rel[rel["n"] >= 10]
+            ax.plot(rel["mean_p"], rel["observed"], marker="o", ms=4, label=labels[m])
+        ax.set(
+            title={"podium": "P(podium)", "scored_points": "P(points)"}[target],
+            xlabel="predicted probability",
+            ylabel="observed frequency",
+            xlim=(0, 1),
+            ylim=(0, 1),
+        )
+    axes[0].legend(fontsize=8, loc="upper left")
+    fig.suptitle("RQ4 reliability, rolling-origin predictions 2022-2025 (bins with n >= 10)")
+    fig.tight_layout()
+    fig.savefig(path, dpi=130)
+    plt.close(fig)
+
+
+def run_rq4(
+    eval_seasons: tuple[int, int] = (2022, 2025),
+    simulator_season: int | None = 2025,
+    simulator_sims: int = 10_000,
+    seed: int = 42,
+) -> dict[str, Any]:
+    """Research plan §RQ4: rolling-origin pre-race predictions, calibration, comparison."""
+    import mlflow
+
+    from pitwall.tracking import tracked_run
+
+    out = REPORTS / "rq4"
+    out.mkdir(parents=True, exist_ok=True)
+    first, last = eval_seasons
+    walk_from = first - 1  # one season of out-of-sample predictions to fit the calibrators
+    feat = (
+        _read("features", "feat_prerace")
+        .filter(F.col("season") <= last)
+        .toPandas()
+        .sort_values(["race_order", "grid_pos"], ignore_index=True)
+    )
+    feat[list(RQ4_TARGETS)] = feat[list(RQ4_TARGETS)].astype(int)
+    params = {
+        "eval_seasons": f"{first}-{last}",
+        "walk_forward_from": walk_from,
+        "n_rows": len(feat),
+        "n_races": int(feat["race_order"].nunique()),
+    }
+    tables = {
+        "feat_prerace": table_path("features", "feat_prerace"),
+        "fact_session_result": table_path("gold", "fact_session_result"),
+    }
+    models = ["grid", "gbm_raw", "gbm_isotonic", "gbm_platt", "plackett_luce"]
+    rng = np.random.default_rng(seed)
+    with tracked_run("rq4-prerace", params, tables, seed) as run:
+        res: dict[str, Any] = {"mlflow_run_id": run.info.run_id, **params}
+        preds = _rq4_calibrate(_rq4_walk_forward(feat, walk_from, seed), first)
+        scored = preds[preds["season"].between(first, last)]
+        res["eval"] = _rq4_scores(scored, models, rng)
+        res["eval_last_season"] = _rq4_scores(scored[scored["season"] == last], models, rng)
+        res["by_season"] = {
+            int(s): {
+                t: {m: float(((g[f"{t}__{m}"] - g[t]) ** 2).mean()) for m in models}
+                for t in RQ4_TARGETS
+            }
+            for s, g in scored.groupby("season")
+        }
+
+        plot_models = ["grid", "gbm_raw", "gbm_isotonic", "plackett_luce"]
+        if simulator_season is not None:
+            rq3 = json.loads((REPORTS / "rq3" / "results.json").read_text())
+            sim = _rq4_simulator_probs(
+                simulator_season,
+                rq3["pace_scale"],
+                rq3["pace_noise_sd_s"],
+                simulator_sims,
+                seed,
+            )
+            both = scored.merge(sim, on=["race_id", "driver_id"])
+            res["vs_simulator"] = {
+                "season": simulator_season,
+                "n_driver_races": len(both),
+                **_rq4_scores(both, [*models, "simulator"], rng),
+            }
+            preds = preds.merge(sim, on=["race_id", "driver_id"], how="left")
+        _plot_rq4(scored, plot_models, out / "reliability.png")
+
+        cols = ["race_id", "driver_id", "grid_pos", "finish_position", *RQ4_TARGETS]
+        cols += [c for c in preds.columns if "__" in c]
+        preds.loc[preds["season"].between(first, last), cols].to_csv(
+            out / "predictions.csv", index=False, float_format="%.4f"
+        )
+        for target, scores in res["eval"].items():
+            for m in models:
+                mlflow.log_metrics(
+                    {f"{target}.{m}.{k}": v for k, v in scores[m].items() if isinstance(v, float)}
+                )
+        mlflow.log_artifacts(str(out), "rq4")
+        _write_json(out / "results.json", res)
+    return res
+
+
 # --- EDA (research plan §3) ------------------------------------------------------------------
 
 
