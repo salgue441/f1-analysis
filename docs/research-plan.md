@@ -47,10 +47,12 @@ This document is written **before** modeling, in the spirit of a pre-registratio
 
 | | |
 |---|---|
-| **Target** | P(podium), P(points) per driver, before the race starts. |
-| **Model** | Gradient boosting + isotonic/Platt calibration; compare with ordinal/rank model. |
-| **Baseline** | Grid-position-only logistic model. |
-| **Metrics** | Brier score, log loss, reliability diagrams, expected calibration error. Rolling-origin evaluation by race. |
+| **Target** | P(podium) (finish ≤ 3) and P(points) (scored points) per driver, before the race starts. Grand Prix races 2018–2025; sprints excluded. |
+| **Data** | `feat_prerace` (driver × race): grid after penalties (pit-lane start = behind the last slot), qualifying position and gap to pole, driver form (mean points and finish over the last 5 races, DNF rate over the last 10, starts), team form (last 5 races, rebrands linked), circuit position-change rate from earlier seasons. Point-in-time correct (tested). |
+| **Model** | **Primary: gradient boosting (monotone in grid and qualifying) + isotonic calibration.** Secondary: the same with Platt scaling, the uncalibrated model, and a **Plackett–Luce rank model** (linear strengths, ridge, probabilities by sampling orders). Hyperparameters fixed in advance, not tuned. |
+| **Baseline** | Logistic regression on grid position only (grid and log grid). |
+| **Evaluation** | **Rolling origin by race.** Before every race from 2021 on, every model is refit on all earlier races; calibrators are refit on the boosting model's out-of-sample predictions for earlier races (from 2021). Scored on **2022–2025** (calibrators then have ≥ 1 season), with 2025 also reported alone and against the RQ3 simulator. |
+| **Metrics** | Brier score (primary), log loss, reliability diagrams, expected calibration error (10 equal-width bins). Race-bootstrap CIs on the Brier difference vs the baseline. Calibrated means ECE ≤ 0.03 for both targets. |
 
 ## 2. Cross-cutting methodology
 
@@ -91,3 +93,4 @@ Each RQ gets `reports/rqN_<name>.md` (rendered from a notebook) with: question �
 | 2026-10-23 | RQ1 | Added a **compound pace offset** (fresh-tyre pace of each compound, partially pooled across circuits, zero-sum over compounds) to the model. | The pre-registered formula had none. Compound choice correlates with race phase (soft at the start or end), so omitting it can bias the wear and fuel estimates, and the RQ3 simulator had no soft-vs-hard pace trade-off. A first RQ3 run exploited that, recommending long stints on whichever compound had the flattest wear. Found before writing up results. |
 | 2026-10-23 | RQ3 | Simulator: compound pace from the RQ1 posterior; wear floored at zero; per-race pace uncertainty; retirement hazard estimated from earlier seasons. The two pace settings (scale on qualifying gaps, race-pace noise) are **tuned on the 2024 backtest** and then frozen for the 2025 test. | The first run was badly overconfident (top-10 calibration error 0.15) and its decision analysis was driven by the missing compound pace. Tuning on 2024 keeps 2025 a true held-out test. |
 | 2026-10-23 | RQ2 | Added a robustness estimate controlling for the three-lap gap trend before the decision. | The placebo outcome (gap change before the stop) was not null. The trend is known at decision time, so it is a legitimate covariate. |
+| 2026-10-23 | RQ4 | Stretch question specified in detail (features, primary model, rolling-origin scheme, scoring window, calibration bar) and the ordinal model made concrete as Plackett–Luce. | Written before any RQ4 model was fitted. RQ4 needs results only, so it uses 2018–2025 rather than the lap-data window. |
