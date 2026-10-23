@@ -1,13 +1,16 @@
 """feat_race_sim_params (RQ3): simulator inputs per race, using only pre-race information.
 
 - field and grid: race grid from Jolpica (pit-lane starts go to the back);
-- pace: qualifying gap to pole, the standard pre-race pace signal;
+- pace: qualifying gap to pole, the standard pre-race pace signal, scaled by `pace_scale`
+  plus a per-race deviation (`pace_noise_sd_s`); both are tuned on the previous season;
 - pit loss: the circuit's median (in-lap + out-lap - 2 x clean lap) from *earlier seasons*,
   shrunk to the all-circuit median when there is little history;
 - SC/VSC hazard per lap: the circuit's neutralization starts per lap from earlier seasons,
   shrunk toward the global rate (gamma-Poisson style pseudo-count);
-- degradation and fuel effect: RQ1 posterior draws for the circuit (circuits RQ1 never saw
-  use the per-draw mean across circuits);
+- retirement hazard per lap: non-classified finishes per lap raced in earlier seasons
+  (results back to 2018);
+- degradation, compound pace and fuel effect: joint RQ1 posterior draws for the circuit
+  (circuits RQ1 never saw use the per-draw mean across circuits);
 - strategies: what each driver actually ran (fact_stint), for the backtest and as the
   baseline in the decision analysis.
 
@@ -27,8 +30,10 @@ from pitwall.simulation.race_simulator import Stint, Strategy
 from pitwall.simulation.strategies import strategy_from_stints
 
 DEFAULT_SC_HAZARD = 0.02
+DEFAULT_DNF_HAZARD = 0.0015
 SC_PSEUDO_LAPS = 300.0
 PIT_LOSS_PSEUDO_STOPS = 10.0
+DRY = ("SOFT", "MEDIUM", "HARD")
 
 
 @dataclass(frozen=True)
@@ -38,6 +43,14 @@ class RaceInputs:
     actual_finish: np.ndarray  # 1-based classified order (retirements at the back)
     grid: np.ndarray
     circuit_id: str
+
+
+@dataclass(frozen=True)
+class PaceSettings:
+    """Simulator settings not estimated by RQ1, tuned on the season before the test season."""
+
+    pace_scale: float = 1.0
+    pace_noise_sd_s: float = 0.0
 
 
 def pit_loss_by_circuit(pit_losses: pd.DataFrame, before_season: int) -> tuple[dict, float, float]:
@@ -65,17 +78,32 @@ def sc_hazard_by_circuit(sc_events: pd.DataFrame, before_season: int) -> tuple[d
     return rate.to_dict(), global_rate
 
 
-def degradation_draws(posterior: pd.DataFrame, circuit_id: str) -> tuple[dict, np.ndarray]:
+def dnf_hazard(results: pd.DataFrame, before_season: int) -> float:
+    """Retirements per lap raced (race sessions of earlier seasons)."""
+    prior = results[(results["season"] < before_season) & (results["session_type"] == "R")]
+    laps = prior["laps_completed"].sum()
+    if prior.empty or not laps:
+        return DEFAULT_DNF_HAZARD
+    return float((~prior["is_classified"].astype(bool)).sum() / laps)
+
+
+def posterior_draws(posterior: pd.DataFrame, circuit_id: str) -> tuple[dict, dict, np.ndarray]:
+    """(degradation, compound pace offset, fuel effect) draws for one circuit."""
     part = posterior[posterior["circuit_id"] == circuit_id]
     if part.empty:  # circuit unseen by RQ1: average over circuits per draw
         part = posterior.groupby(["compound", "draw"], as_index=False)[
-            ["beta_s_per_lap", "fuel_effect_s_per_lap"]
+            ["beta_s_per_lap", "compound_offset_s", "fuel_effect_s_per_lap"]
         ].mean()
-    deg = {
-        k: g.sort_values("draw")["beta_s_per_lap"].to_numpy() for k, g in part.groupby("compound")
-    }
+    deg, offset = {}, {}
+    for k, g in part.groupby("compound"):
+        g = g.sort_values("draw")
+        deg[k] = g["beta_s_per_lap"].to_numpy()
+        offset[k] = g["compound_offset_s"].to_numpy()
     fuel = part.groupby("draw")["fuel_effect_s_per_lap"].first().sort_index().to_numpy()
-    return deg, fuel
+    for k in DRY:  # a compound never run at this circuit: neutral pace, average wear
+        deg.setdefault(k, np.full(len(fuel), 0.05))
+        offset.setdefault(k, np.zeros(len(fuel)))
+    return deg, offset, fuel
 
 
 def build_race_inputs(
@@ -86,9 +114,13 @@ def build_race_inputs(
     pit_losses: pd.DataFrame,
     sc_events: pd.DataFrame,
     posterior: pd.DataFrame,
+    pace: PaceSettings | None = None,
 ) -> list[RaceInputs]:
+    """`results` may span all seasons: earlier ones feed the retirement hazard."""
+    pace = pace or PaceSettings()
     loss_by_circuit, loss_overall, loss_sd = pit_loss_by_circuit(pit_losses, season)
     hazard_by_circuit, hazard_global = sc_hazard_by_circuit(sc_events, season)
+    dnf = dnf_hazard(results, season)
     races = sessions[(sessions["season"] == season) & (sessions["session_type"] == "R")]
     out = []
     for race in races.sort_values("round").itertuples(index=False):
@@ -115,17 +147,19 @@ def build_race_inputs(
                     strategy=strategy_from_stints(own, laps),
                 )
             )
-        deg, fuel = degradation_draws(posterior, circuit)
-        for compound in ("SOFT", "MEDIUM", "HARD"):
-            deg.setdefault(compound, np.full(len(fuel), 0.05))
+        deg, offset, fuel = posterior_draws(posterior, circuit)
         params = FieldParams(
             race_laps=laps,
             base_lap_s=float(pole * 1.07) if pd.notna(pole) else 95.0,
             deg_draws=deg,
             fuel_draws=fuel,
+            compound_offset_draws=offset,
             pit_loss_mean_s=float(loss_by_circuit.get(circuit, loss_overall)),
             pit_loss_sd_s=loss_sd,
             sc_hazard_per_lap=float(hazard_by_circuit.get(circuit, hazard_global)),
+            dnf_hazard_per_lap=dnf,
+            pace_scale=pace.pace_scale,
+            pace_noise_sd_s=pace.pace_noise_sd_s,
         )
         race_id = f"{season}_{rnd:02d}"
         out.append(
@@ -140,10 +174,22 @@ def build_race_inputs(
     return out
 
 
+SCALAR_PARAMS = [
+    "race_laps",
+    "base_lap_s",
+    "pit_loss_mean_s",
+    "pit_loss_sd_s",
+    "sc_hazard_per_lap",
+    "dnf_hazard_per_lap",
+    "pace_scale",
+    "pace_noise_sd_s",
+]
+
+
 def to_tables(inputs: list[RaceInputs], season: int) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Persistable form: one row per race (scalars) and one per car (grid, pace, strategy).
 
-    Degradation draws are not copied: readers join the RQ1 posterior by circuit.
+    Posterior draws are not copied: readers join the RQ1 posterior by circuit.
     """
     races, cars = [], []
     for ri in inputs:
@@ -153,11 +199,7 @@ def to_tables(inputs: list[RaceInputs], season: int) -> tuple[pd.DataFrame, pd.D
                 "season": season,
                 "race_id": ri.setup.race_id,
                 "circuit_id": ri.circuit_id,
-                "race_laps": p.race_laps,
-                "base_lap_s": p.base_lap_s,
-                "pit_loss_mean_s": p.pit_loss_mean_s,
-                "pit_loss_sd_s": p.pit_loss_sd_s,
-                "sc_hazard_per_lap": p.sc_hazard_per_lap,
+                **{name: getattr(p, name) for name in SCALAR_PARAMS},
             }
         )
         for i, car in enumerate(ri.setup.cars):
@@ -184,17 +226,12 @@ def parse_strategy(text: str, name: str = "actual") -> Strategy:
 
 def from_tables(race: pd.Series, cars: pd.DataFrame, posterior: pd.DataFrame) -> RaceSetup:
     """Rebuild a RaceSetup from the persisted tables (used by the app; no Spark)."""
-    deg, fuel = degradation_draws(posterior, race["circuit_id"])
-    for compound in ("SOFT", "MEDIUM", "HARD"):
-        deg.setdefault(compound, np.full(len(fuel), 0.05))
+    deg, offset, fuel = posterior_draws(posterior, race["circuit_id"])
     params = FieldParams(
-        race_laps=int(race["race_laps"]),
-        base_lap_s=float(race["base_lap_s"]),
         deg_draws=deg,
         fuel_draws=fuel,
-        pit_loss_mean_s=float(race["pit_loss_mean_s"]),
-        pit_loss_sd_s=float(race["pit_loss_sd_s"]),
-        sc_hazard_per_lap=float(race["sc_hazard_per_lap"]),
+        compound_offset_draws=offset,
+        **{name: race[name] for name in SCALAR_PARAMS if name in race},
     )
     ordered = cars.sort_values("car_index")
     field_cars = tuple(

@@ -19,8 +19,19 @@ def test_race_inputs_round_trip_through_tables():
     ]
     races, cars = to_tables(inputs, 2025)
     posterior = pd.DataFrame(
-        [("bahrain", k, d, 0.05, 0.03) for k in ("SOFT", "MEDIUM", "HARD") for d in range(10)],
-        columns=["circuit_id", "compound", "draw", "beta_s_per_lap", "fuel_effect_s_per_lap"],
+        [
+            ("bahrain", k, d, 0.05, -0.2, 0.03)
+            for k in ("SOFT", "MEDIUM", "HARD")
+            for d in range(10)
+        ],
+        columns=[
+            "circuit_id",
+            "compound",
+            "draw",
+            "beta_s_per_lap",
+            "compound_offset_s",
+            "fuel_effect_s_per_lap",
+        ],
     )
     rebuilt = from_tables(races.iloc[0], cars, posterior)
     assert [c.strategy.stints for c in rebuilt.cars] == [c.strategy.stints for c in setup.cars]

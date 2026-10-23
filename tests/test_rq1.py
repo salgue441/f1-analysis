@@ -205,6 +205,11 @@ def test_bayesian_model_recovers_known_parameters():
     fuel_lo, fuel_hi = np.quantile(draws["fuel_effect"], [0.03, 0.97])
     assert fuel_lo <= truth.fuel_effect <= fuel_hi
 
+    k = {c: j for j, c in enumerate(draws["compounds"])}
+    soft_vs_hard = draws["alpha_compound"][:, k["SOFT"]] - draws["alpha_compound"][:, k["HARD"]]
+    lo_a, hi_a = np.quantile(soft_vs_hard, [0.03, 0.97])
+    assert lo_a - 0.05 <= -1.0 <= hi_a + 0.05
+
     # Circuit x compound slopes: most true values inside their 90% intervals.
     covered = []
     for i, c in enumerate(draws["circuits"]):

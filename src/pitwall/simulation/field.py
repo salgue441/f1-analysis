@@ -2,9 +2,12 @@
 
 Lap by lap, vectorized over simulations (arrays are n_sims x n_cars):
 
-- lap time = base + car pace offset + fuel effect x laps left + degradation x tyre age
-  + noise. Degradation and fuel effect are drawn per simulation from the RQ1 posterior,
-  so parameter uncertainty propagates into the result;
+- lap time = base + car pace + compound pace + fuel effect x laps left
+  + degradation x tyre age + noise. Degradation, compound pace and fuel effect come from
+  one RQ1 posterior draw per simulation, so parameter uncertainty propagates. Wear is
+  floored at zero (a negative posterior draw is track evolution, not tyres getting faster);
+- car pace = pace_scale x pre-race pace offset + a per-race deviation drawn once per car
+  and simulation: qualifying gaps only partly predict race pace;
 - pit stops at the end of each stint's last lap cost the pit loss, discounted under SC/VSC;
 - safety cars start with a per-lap hazard, last a few laps, slow everyone and bunch the
   field up (order kept, ~1 s gaps);
@@ -54,6 +57,10 @@ class FieldParams:
     pass_scale_s: float = 0.25
     min_follow_gap_s: float = 0.4
     dnf_hazard_per_lap: float = 0.0006
+    pace_scale: float = 1.0  # multiplier on the pre-race pace offsets
+    pace_noise_sd_s: float = 0.0  # per-car, per-simulation race pace deviation (s/lap)
+    # compound -> draws of fresh-tyre pace (s), aligned draw-by-draw with deg_draws.
+    compound_offset_draws: dict[str, np.ndarray] | None = None
 
 
 def _stint_plan(strategy: Strategy, race_laps: int) -> tuple[list[str], np.ndarray]:
@@ -74,12 +81,16 @@ def simulate_field(
     """Finishing positions (1 = winner), shape (n_sims, n_cars), in the order of `cars`."""
     n, laps = len(cars), params.race_laps
     plans = [_stint_plan(c.strategy, laps) for c in cars]
-    pace = np.array([c.pace_offset_s for c in cars])[None, :]
+    pace = params.pace_scale * np.array([c.pace_offset_s for c in cars])[None, :]
+    pace = pace + rng.normal(0, params.pace_noise_sd_s, (n_sims, n))
 
-    # Parameter uncertainty: one posterior draw per simulation, shared by all cars.
+    # Parameter uncertainty: one joint posterior draw per simulation, shared by all cars.
     draw_idx = rng.integers(0, len(params.fuel_draws), n_sims)
     fuel = params.fuel_draws[draw_idx][:, None]
-    deg = {k: v[rng.integers(0, len(v), n_sims)][:, None] for k, v in params.deg_draws.items()}
+    deg = {k: np.maximum(v[draw_idx % len(v)], 0.0) for k, v in params.deg_draws.items()}
+    offsets = params.compound_offset_draws or {}
+    offset = {k: v[draw_idx % len(v)] for k, v in offsets.items()}
+    no_offset = np.zeros(n_sims)
 
     grid_order = np.argsort(np.argsort([c.grid if c.grid > 0 else 99 for c in cars]))
     cum = np.tile(grid_order * params.start_spacing_s, (n_sims, 1)).astype(float)
@@ -95,11 +106,14 @@ def simulate_field(
 
         tyre_age += 1
         deg_now = np.empty((n_sims, n))
+        offset_now = np.empty((n_sims, n))
         for i, (compounds, _) in enumerate(plans):
-            deg_now[:, i] = deg[compounds[lap - 1]][:, 0]
+            deg_now[:, i] = deg[compounds[lap - 1]]
+            offset_now[:, i] = offset.get(compounds[lap - 1], no_offset)
         lap_time = (
             params.base_lap_s
             + pace
+            + offset_now
             + fuel * (laps - lap)
             + deg_now * tyre_age
             + rng.normal(0, params.lap_noise_sd_s, (n_sims, n))
