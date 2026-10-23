@@ -1,0 +1,56 @@
+services:
+  workbench:
+    build: .
+    image: pitwall-workbench
+    volumes:
+      - .:/workspace
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    ports:
+      - "3000:3000"   # Dagster UI
+      - "4040:4040"   # Spark UI (local mode driver)
+      - "8501:8501"   # Streamlit
+      - "8888:8888"   # JupyterLab
+    depends_on:
+      - mlflow
+
+  mlflow:
+    image: pitwall-workbench
+    build: .
+    volumes:
+      - .:/workspace
+    command: >
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri sqlite:////workspace/data/mlflow/mlflow.db
+      --default-artifact-root /workspace/data/mlflow/artifacts
+    ports:
+      - "5000:5000"
+
+  # Optional standalone cluster: `docker compose --profile cluster up -d`
+  # then set spark.master: spark://spark-master:7077 in conf/local.yaml
+  spark-master:
+    image: pitwall-workbench
+    profiles: ["cluster"]
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+    volumes:
+      - .:/workspace
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+
+  spark-worker:
+    image: pitwall-workbench
+    profiles: ["cluster"]
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+    environment:
+      SPARK_WORKER_CORES: "2"
+      SPARK_WORKER_MEMORY: "3g"
+    volumes:
+      - .:/workspace
+    depends_on:
+      - spark-master
+    deploy:
+      replicas: 2

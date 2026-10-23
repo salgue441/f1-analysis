@@ -1,0 +1,31 @@
+# Base configuration. Override per environment in conf/<PITWALL_ENV>.yaml
+# and per value with PITWALL_* environment variables (see src/pitwall/config.py).
+
+lakehouse_root: /workspace/data/lakehouse
+seasons:
+  start: 2018
+  end: 2025
+
+jolpica:
+  base_url: https://api.jolpi.ca/ergast/f1
+  page_size: 100
+  min_interval_s: 8.0        # ~450 req/hour, under the 500/hour limit
+  max_retries: 5
+
+fastf1:
+  cache_dir: /workspace/data/fastf1_cache
+  session_types: [R]         # add Q, S, FP2 later for practice long runs
+
+spark:
+  master: local[*]
+  conf:
+    spark.sql.shuffle.partitions: "64"
+    spark.sql.adaptive.enabled: "true"
+    spark.sql.adaptive.skewJoin.enabled: "true"
+    spark.driver.memory: 4g
+
+quality:
+  max_quarantine_ratio: 0.05  # fail the batch if more than 5% of rows are rejected
+
+mlflow:
+  experiment_prefix: pitwall

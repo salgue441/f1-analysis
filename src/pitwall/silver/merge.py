@@ -1,0 +1,36 @@
+"""Idempotent upsert into silver Delta tables (SAD §9.2)."""
+
+from __future__ import annotations
+
+from delta.tables import DeltaTable
+from pyspark.sql import DataFrame, SparkSession
+
+
+def merge_into_delta(
+    spark: SparkSession,
+    df: DataFrame,
+    path: str,
+    keys: list[str],
+    partition_by: list[str] | None = None,
+) -> None:
+    """MERGE `df` into the Delta table at `path` on `keys`; create the table if missing."""
+    if not DeltaTable.isDeltaTable(spark, path):
+        writer = df.write.format("delta").mode("overwrite")
+        if partition_by:
+            writer = writer.partitionBy(*partition_by)
+        writer.save(path)
+        return
+
+    condition = " AND ".join(f"t.{k} <=> s.{k}" for k in keys)
+    (
+        DeltaTable.forPath(spark, path)
+        .alias("t")
+        .merge(df.alias("s"), condition)
+        .whenMatchedUpdateAll()
+        .whenNotMatchedInsertAll()
+        .execute()
+    )
+
+
+def append_quarantine(df: DataFrame, path: str) -> None:
+    df.write.format("delta").mode("append").option("mergeSchema", "true").save(path)
