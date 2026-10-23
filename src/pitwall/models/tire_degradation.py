@@ -169,6 +169,8 @@ def diagnostics(idata: az.InferenceData) -> dict[str, float]:
         "min_ess_bulk": float(summary["ess_bulk"].min()),
         "min_ess_tail": float(summary["ess_tail"].min()),
         "divergences": divergences,
+        "worst_ess": summary["ess_bulk"].nsmallest(3).round(0).to_dict(),
+        "worst_rhat": summary["r_hat"].nlargest(3).round(3).to_dict(),
     }
 
 
