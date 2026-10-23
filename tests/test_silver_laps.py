@@ -7,7 +7,8 @@ BRONZE_SCHEMA = (
     "team string, lap_number double, stint double, lap_time double, sector1_time double, "
     "sector2_time double, sector3_time double, compound string, tyre_life double, "
     "fresh_tyre string, pit_in_time double, pit_out_time double, track_status string, "
-    "is_accurate string, deleted string, position double, "
+    "is_accurate string, deleted string, position double, lap_start_time double, "
+    "time double, speed_st double, "
     "_ingested_at timestamp, _batch_id string"
 )
 
@@ -35,6 +36,9 @@ def _row(lap_time, ingested_at, pit_in=float("nan"), track_status="1"):
         "True",
         "False",
         1.0,
+        3600.0,
+        3600.0 + lap_time,
+        310.0,
         ingested_at,
         "b1",
     )
