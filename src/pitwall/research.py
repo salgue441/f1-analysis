@@ -754,6 +754,7 @@ def run_eda(seasons: list[int]) -> dict[str, Any]:
 
     out = REPORTS / "eda"
     out.mkdir(parents=True, exist_ok=True)
+    get_spark()  # a Column needs an active session
     in_seasons = F.col("season").isin(seasons)
     laps = _read("gold", "fact_lap").filter(in_seasons & (F.col("session_type") == "R"))
     races = _read("gold", "dim_session").filter(F.col("session_type") == "R")
