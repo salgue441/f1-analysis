@@ -14,3 +14,6 @@ derby.log
 # Data never goes into git (licensing + size)
 data/
 conf/local.yaml
+
+# dagster dev scratch instance (left behind if the server is killed)
+.tmp_dagster_home_*/
