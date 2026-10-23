@@ -156,3 +156,13 @@ Only pre-race information; form windows end one race before the current one (tes
 | `podium`, `scored_points`, `finish_position` | targets |
 
 Partitioned by `season`, 2018–2025.
+
+## Stream tables (race day, [ADR-0007](adr/0007-race-day-streaming.md))
+
+| Table | Grain | Write | Columns |
+|---|---|---|---|
+| `stream.events` | OpenF1 record | append per micro-batch (idempotent) | `session_key`, `endpoint`, `payload` (JSON), `emitted_at`, `stream_batch_id` |
+| `stream.race_state` | car × session | overwrite per session each micro-batch | `position`, `driver`, `team`, `lap_number`, `last_lap_s`, `gap_ahead_s` (at the line, last common lap), `compound`, `stint_number`, `tyre_age_laps`, `pit_stops`, `time_loss_vs_new_s` (RQ1 wear × tyre age), `track_status`, `laps_remaining`, `undercut_window`, `undercut_effect_pp` (RQ2, by wear tier), `last_lap_end_utc` |
+| `stream._batches` | micro-batch | append (idempotent) | `n_events`, first/last `emitted_at`, `state_written_at`, `max_latency_s`, `min_latency_s`, `append_s`, `processing_s` |
+
+All are partitioned by `session_key`.

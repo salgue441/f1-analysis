@@ -53,6 +53,22 @@ def main(argv: list[str] | None = None) -> None:
     run.add_argument("--laps", action="store_true", help="Also run the FastF1 lap graph")
     run.add_argument("--telemetry", action="store_true", help="With --laps: include telemetry")
 
+    stream = sub.add_parser("stream", help="Race-day streaming into stream.race_state")
+    stream_sub = stream.add_subparsers(dest="mode", required=True)
+    rep = stream_sub.add_parser("replay", help="Replay a past race from bronze as if live")
+    rep.add_argument("--season", type=int, required=True)
+    rep.add_argument("--round", type=int, required=True)
+    rep.add_argument("--speed", type=float, default=30.0, help="Race seconds per wall second")
+    rep.add_argument("--trigger", type=float, default=2.0, help="Micro-batch interval (s)")
+    live = stream_sub.add_parser(
+        "live", help="OpenF1 live feed (Sponsor tier; OPENF1_USERNAME / OPENF1_PASSWORD)"
+    )
+    live.add_argument("--session-key", type=int, required=True)
+    live.add_argument("--season", type=int, required=True)
+    live.add_argument("--round", type=int, required=True)
+    live.add_argument("--circuit", help="Jolpica circuit id, if the round isn't in dim_session")
+    live.add_argument("--trigger", type=float, default=2.0)
+
     sub.add_parser("maintain", help="OPTIMIZE (+Z-order) and VACUUM every lakehouse table")
 
     sub.add_parser("fingerprints", help="Row counts + checksums of silver and gold tables")
@@ -144,6 +160,25 @@ def main(argv: list[str] | None = None) -> None:
                 seed=args.seed,
             )
             print(json.dumps(results["eval"], indent=2))
+        return
+    if args.command == "stream":
+        import os
+
+        from pitwall.streaming import pipeline as stream_pipeline
+
+        if args.mode == "replay":
+            summary = stream_pipeline.run_replay(
+                args.season, args.round, speed=args.speed, trigger_s=args.trigger
+            )
+        else:
+            user, password = os.environ.get("OPENF1_USERNAME"), os.environ.get("OPENF1_PASSWORD")
+            if not user or not password:
+                parser.error("live mode needs OPENF1_USERNAME and OPENF1_PASSWORD (Sponsor tier)")
+            session = stream_pipeline.StreamSession(
+                args.session_key, args.season, args.round, args.circuit
+            )
+            summary = stream_pipeline.run_live_stream(session, user, password, args.trigger)
+        print(json.dumps(summary, indent=2, default=str))
         return
     if args.command == "maintain":
         print(json.dumps(pipelines.maintain(), indent=2))

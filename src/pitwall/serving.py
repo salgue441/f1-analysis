@@ -102,9 +102,18 @@ def laps_for_race(race_id: str) -> pd.DataFrame | None:
     )
 
 
+def live_state() -> pd.DataFrame | None:
+    """stream.race_state for the most recently updated session (`pitwall stream ...`)."""
+    state = read_table("stream", "race_state")
+    if state is None or state.empty:
+        return None
+    latest = state.loc[state["_updated_at"].idxmax(), "session_key"]
+    return state[state["session_key"] == latest].sort_values("position")
+
+
 def findings() -> dict[str, dict]:
     out = {}
-    for rq in ("rq1", "rq2", "rq3"):
+    for rq in ("rq1", "rq2", "rq3", "rq4"):
         path = REPORTS / rq / "results.json"
         if path.exists():
             out[rq] = json.loads(path.read_text())

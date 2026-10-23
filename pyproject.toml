@@ -42,6 +42,7 @@ causal = [
     "econml>=0.15",
     "dowhy>=0.11",
 ]
+live = ["paho-mqtt>=2.1"]
 dev = [
     "pytest>=8",
     "pytest-cov>=5",

@@ -1,0 +1,47 @@
+{
+  "context": {
+    "deg_s_per_lap": {
+      "HARD": 0.055324329122375615,
+      "MEDIUM": 0.08299155033841703,
+      "SOFT": 0.12944115943043819
+    },
+    "race_laps": 58,
+    "tier": "high",
+    "undercut_effect_pp": 49.52342225506318
+  },
+  "round": 24,
+  "runs": [
+    {
+      "batch_processing_s_median": 7.9992968310034485,
+      "batch_processing_s_p95": 13.874170158554625,
+      "delta_append_s_median": 2.0281994635006413,
+      "events": 2027,
+      "latency_s_median": 17.862025,
+      "latency_s_p95": 25.37510065,
+      "micro_batches": 14
+    },
+    {
+      "batch_processing_s_median": 8.529317617008928,
+      "batch_processing_s_p95": 13.691620511998188,
+      "delta_append_s_median": 2.155931821995182,
+      "events": 2027,
+      "latency_s_median": 19.554298,
+      "latency_s_p95": 25.435045399999993,
+      "micro_batches": 13
+    },
+    {
+      "batch_processing_s_median": 7.648926877998747,
+      "batch_processing_s_p95": 14.261725861101148,
+      "delta_append_s_median": 2.083592087998113,
+      "events": 2027,
+      "latency_s_median": 17.140757999999998,
+      "latency_s_p95": 24.222654799999997,
+      "micro_batches": 14
+    }
+  ],
+  "season": 2025,
+  "session_key": 9839,
+  "speed": 60.0,
+  "storage": "container filesystem (Docker Desktop, WSL2)",
+  "trigger_s": 2.0
+}

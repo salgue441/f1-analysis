@@ -69,7 +69,9 @@ if setup is None:
     st.stop()
 
 drivers = [c.driver_id for c in setup.cars]
-explore, race_tab, findings_tab = st.tabs(["Strategy explorer", "Race laps", "Findings"])
+explore, race_tab, live_tab, findings_tab = st.tabs(
+    ["Strategy explorer", "Race laps", "Live race", "Findings"]
+)
 
 with explore:
     left, right = st.columns([1, 2])
@@ -242,10 +244,71 @@ with race_tab:
         fig.update_layout(height=380, yaxis_title="lap time (s)", margin=dict(t=20))
         st.plotly_chart(fig, use_container_width=True)
 
+with live_tab:
+
+    @st.fragment(run_every="2s")
+    def live_board() -> None:
+        state = serving.live_state()
+        if state is None:
+            st.info(
+                "No live session yet. Run `make stream-replay` (a past race replayed through "
+                "Spark Structured Streaming) or `pitwall stream live` during a session."
+            )
+            return
+        lead = state.iloc[0]
+        c1, c2, c3 = st.columns(3)
+        c1.metric(
+            "Lap", f"{int(state['lap_number'].max())}", f"{int(lead['laps_remaining'])} to go"
+        )
+        c2.metric("Track", str(lead["track_status"]).replace("_", " "))
+        c3.metric("Undercut windows open", int(state["undercut_window"].sum()))
+        board = state[
+            [
+                "position",
+                "driver",
+                "team",
+                "gap_ahead_s",
+                "last_lap_s",
+                "compound",
+                "tyre_age_laps",
+                "pit_stops",
+                "time_loss_vs_new_s",
+                "undercut_window",
+                "undercut_effect_pp",
+            ]
+        ].astype({"gap_ahead_s": float, "undercut_effect_pp": float})
+        st.dataframe(
+            board.style.format(
+                {
+                    "gap_ahead_s": "{:.1f}",
+                    "last_lap_s": "{:.3f}",
+                    "time_loss_vs_new_s": "{:.2f}",
+                    "undercut_effect_pp": "+{:.0f} pp",
+                },
+                na_rep="",
+            ).apply(
+                lambda row: (
+                    ["background-color: #fde2c8" if row["undercut_window"] else ""] * len(row)
+                ),
+                axis=1,
+            ),
+            hide_index=True,
+            use_container_width=True,
+            height=740,
+        )
+        st.caption(
+            "Time loss: RQ1 posterior mean wear for this circuit and compound x tyre age. "
+            "Undercut window: within 3 s of the car ahead, both on tyres 5+ laps old, green "
+            "flag, 8+ laps left, at a circuit where RQ2 found the undercut works; the effect "
+            "is RQ2's estimate for the circuit's wear tier. Refreshes every 2 s."
+        )
+
+    live_board()
+
 with findings_tab:
     found = serving.findings()
     if not found:
-        st.info("Findings appear after the research runs (`pitwall research rq1|rq2|rq3`).")
+        st.info("Findings appear after the research runs (`pitwall research rq1..rq4`).")
     if "rq1" in found:
         r = found["rq1"]
         st.subheader("RQ1 · How fast do tyres wear?")
@@ -286,3 +349,15 @@ with findings_tab:
             f"95% CI {dec['mean_gain_ci'][0]:.2f} – {dec['mean_gain_ci'][1]:.2f}",
             delta_color="off",
         )
+    if "rq4" in found:
+        ev = found["rq4"]["eval"]
+        st.subheader("RQ4 · Can we beat the grid before the race?")
+        c1, c2 = st.columns(2)
+        for col, target, label in [(c1, "podium", "P(podium)"), (c2, "scored_points", "P(points)")]:
+            m, g = ev[target]["gbm_isotonic"], ev[target]["grid"]
+            col.metric(
+                f"{label} Brier, calibrated boosting (lower is better)",
+                f"{m['brier']:.4f}",
+                f"grid only {g['brier']:.4f} · ECE {m['ece']:.3f}",
+                delta_color="off",
+            )

@@ -1,10 +1,12 @@
 EXEC = docker compose exec workbench
 SEASON ?= 2024
+ROUND ?= 24
+SPEED ?= 30
 SEASONS ?= 2018 2019 2020 2021 2022 2023 2024 2025
 LAP_SEASONS ?= 2023 2024 2025
 
 .PHONY: help up down cluster shell test test-all lint fmt typecheck lock ingest-results \
-	backfill features eda rq1 rq2 rq3 rq4 research demo perf maintain dagster jupyter app
+	backfill features eda rq1 rq2 rq3 rq4 research demo perf maintain stream-replay dagster jupyter app
 
 help:  ## Show targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -88,6 +90,9 @@ dagster:  ## Dagster UI on :3000
 
 jupyter:  ## JupyterLab on :8888
 	$(EXEC) jupyter lab --ip 0.0.0.0 --port 8888 --no-browser --allow-root
+
+stream-replay:  ## Replay a past race through the streaming pipeline (SEASON, ROUND=24, SPEED=30)
+	$(EXEC) pitwall stream replay --season $(SEASON) --round $(ROUND) --speed $(SPEED)
 
 app:  ## Streamlit strategy explorer on :8501
 	$(EXEC) streamlit run app/streamlit_app.py --server.address 0.0.0.0
