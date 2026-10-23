@@ -98,6 +98,7 @@ flowchart LR
 | Orchestration | **Dagster** assets (each table = one asset, partitioned by season) | [ADR-0004](adr/0004-dagster-orchestration.md) |
 | Modeling | **PyMC** (Bayesian), **EconML/DoWhy** (causal), **MLflow** tracking | [ADR-0005](adr/0005-modeling-stack.md) |
 | Lap-level source | **OpenF1** (2023+); FastF1 kept as an inactive alternative | [ADR-0006](adr/0006-openf1-as-lap-data-source.md) |
+| Cloud | Config-only profiles (`s3local`, `s3`, `aws`, `databricks`); EMR Serverless via Terraform, Databricks via Asset Bundle; verified on local S3 | [ADR-0008](adr/0008-cloud-deployment.md) |
 | Validation | Temporal splits by season/race; never random splits | [Research plan §2](research-plan.md#2-cross-cutting-methodology) |
 
 ---
@@ -267,12 +268,12 @@ flowchart LR
 
 | Local | AWS | Azure | Databricks |
 |---|---|---|---|
-| `./data/lakehouse` | S3 | ADLS Gen2 | Unity Catalog volume |
-| Spark standalone | EMR Serverless | Synapse Spark | Jobs compute |
+| `./data/lakehouse` | S3 | ADLS Gen2 | External location (path-based Delta) |
+| Spark standalone | EMR Serverless (custom image) | Synapse Spark | Jobs compute (15.4 LTS) |
 | Dagster local | Dagster+ / MWAA | — | Workflows |
 | MLflow local | SageMaker MLflow | Azure ML | Managed MLflow |
 
-Only `conf/<env>.yaml` changes (`lakehouse_root`, `spark.master`, credentials via environment variables).
+Only `conf/<env>.yaml` changes: `lakehouse_root`, `spark.master` (empty on managed platforms), `spark.delta_pip` (off where the platform ships Delta), `spark.packages` (`hadoop-aws` for `s3a://`). Credentials come from environment variables. Profiles: `s3local` (S3-compatible store in Docker, used to verify), `s3`, `aws`, `databricks`. AWS infrastructure is Terraform in `deploy/aws/`, and Databricks is an Asset Bundle (`databricks.yml`). The runbook is [cloud.md](cloud.md) and the decision is [ADR-0008](adr/0008-cloud-deployment.md).
 
 ---
 

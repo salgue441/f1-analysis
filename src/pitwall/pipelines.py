@@ -451,21 +451,60 @@ def table_fingerprint(df: DataFrame) -> dict[str, int]:
     return {"rows": row["rows"], "checksum": row["checksum"]}
 
 
-def fingerprints(layers: tuple[Layer, ...] = ("silver", "gold")) -> dict[str, dict[str, int]]:
-    """Fingerprint every Delta table in the given layers (for rebuild-twice checks)."""
+def fingerprints(
+    layers: tuple[Layer, ...] = ("silver", "gold"), season: int | None = None
+) -> dict[str, dict[str, int]]:
+    """Fingerprint every Delta table in the given layers (for rebuild-twice checks).
+
+    With `season`, only tables that have a `season` column, filtered to it: dimensions span
+    every loaded season, so they are only comparable between full lakehouses.
+    """
     spark = get_spark()
-    return {
-        f"{layer}.{table}": table_fingerprint(spark.read.format("delta").load(path))
-        for layer, table, path in _delta_tables(layers)
-    }
+    out = {}
+    for layer, table, path in _delta_tables(layers):
+        df = spark.read.format("delta").load(path)
+        if season is not None:
+            if "season" not in df.columns:
+                continue
+            df = df.filter(F.col("season") == season)
+        out[f"{layer}.{table}"] = table_fingerprint(df)
+    return out
 
 
-def _delta_tables(layers: tuple[Layer, ...]) -> list[tuple[str, str, str]]:
+def copy_tables(
+    source_root: str,
+    target_root: str,
+    layers: tuple[Layer, ...] = ("bronze",),
+    seasons: list[int] | None = None,
+    exclude: tuple[str, ...] = (),
+) -> dict[str, int]:
+    """Copy Delta tables between lakehouses (e.g. local -> S3), keeping partitioning and
+    every column, so the target can be rebuilt from its own bronze."""
+    from delta.tables import DeltaTable
+
+    spark = get_spark()
+    copied = {}
+    for layer, table, path in _delta_tables(layers, source_root):
+        if table in exclude:
+            continue
+        df = spark.read.format("delta").load(path)
+        if seasons and "season" in df.columns:
+            df = df.filter(F.col("season").isin(seasons))
+        partitions = DeltaTable.forPath(spark, path).detail().first()["partitionColumns"]
+        writer = df.write.format("delta").mode("overwrite").option("overwriteSchema", "true")
+        if partitions:
+            writer = writer.partitionBy(*partitions)
+        writer.save(f"{target_root.rstrip('/')}/{layer}/{table}")
+        copied[f"{layer}.{table}"] = df.count()
+    return copied
+
+
+def _delta_tables(layers: tuple[Layer, ...], root: str | None = None) -> list[tuple[str, str, str]]:
     """(layer, table, path) for every Delta table under the lakehouse root."""
     from delta.tables import DeltaTable
 
     spark = get_spark()
-    root = get_settings().lakehouse_root
+    root = root or get_settings().lakehouse_root
     hadoop_path = spark._jvm.org.apache.hadoop.fs.Path  # type: ignore[union-attr]
     fs = hadoop_path(root).getFileSystem(spark._jsc.hadoopConfiguration())  # type: ignore[union-attr]
     found = []

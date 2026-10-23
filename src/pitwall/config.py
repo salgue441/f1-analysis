@@ -41,8 +41,13 @@ class FastF1Settings(BaseModel):
 
 
 class SparkSettings(BaseModel):
+    # Empty on managed platforms (EMR, Databricks), which set the master themselves.
     master: str = "local[*]"
     conf: dict[str, str] = Field(default_factory=dict)
+    # Extra Maven packages (e.g. hadoop-aws for s3a://), resolved at session start.
+    packages: list[str] = Field(default_factory=list)
+    # Add the Delta jars from the pip package. Off where the platform ships Delta.
+    delta_pip: bool = True
 
 
 class QualitySettings(BaseModel):

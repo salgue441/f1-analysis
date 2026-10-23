@@ -1,0 +1,9 @@
+{
+  "identities": [
+    {
+      "name": "pitwall",
+      "credentials": [{ "accessKey": "pitwall", "secretKey": "pitwall-secret" }],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

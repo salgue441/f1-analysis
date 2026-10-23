@@ -4,7 +4,7 @@ SEASONS ?= 2018 2019 2020 2021 2022 2023 2024 2025
 LAP_SEASONS ?= 2023 2024 2025
 
 .PHONY: help up down cluster shell test test-all lint fmt typecheck lock ingest-results \
-	backfill features eda rq1 rq2 rq3 rq4 research demo perf maintain dagster jupyter app
+	backfill features eda rq1 rq2 rq3 rq4 research demo perf maintain s3-up s3-verify dagster jupyter app
 
 help:  ## Show targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -88,6 +88,12 @@ dagster:  ## Dagster UI on :3000
 
 jupyter:  ## JupyterLab on :8888
 	$(EXEC) jupyter lab --ip 0.0.0.0 --port 8888 --no-browser --allow-root
+
+s3-up:  ## Start the local S3-compatible store (SeaweedFS) with bucket "pitwall"
+	docker compose --profile s3 up -d s3 s3-init
+
+s3-verify: s3-up  ## Rebuild SEASON on local S3 from copied bronze; compare with local -> reports/engineering
+	$(EXEC) python deploy/s3local/verify.py $(SEASON)
 
 app:  ## Streamlit strategy explorer on :8501
 	$(EXEC) streamlit run app/streamlit_app.py --server.address 0.0.0.0

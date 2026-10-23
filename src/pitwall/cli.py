@@ -55,7 +55,14 @@ def main(argv: list[str] | None = None) -> None:
 
     sub.add_parser("maintain", help="OPTIMIZE (+Z-order) and VACUUM every lakehouse table")
 
-    sub.add_parser("fingerprints", help="Row counts + checksums of silver and gold tables")
+    fp = sub.add_parser("fingerprints", help="Row counts + checksums of silver and gold tables")
+    fp.add_argument("--season", type=int, help="Only season-partitioned tables, this season")
+    cp = sub.add_parser("copy", help="Copy Delta tables between lakehouses (e.g. local -> S3)")
+    cp.add_argument("--from", dest="source", required=True, help="Source lakehouse root")
+    cp.add_argument("--to", dest="target", default=None, help="Default: this env's root")
+    cp.add_argument("--layer", action="append", default=None, help="Repeatable; default bronze")
+    cp.add_argument("--season", type=int, action="append", help="Repeatable; default all")
+    cp.add_argument("--exclude", action="append", default=[], help="Table name to skip")
     sub.add_parser("perf", help="Layout before/after OPTIMIZE + skew -> reports/engineering")
 
     rq = sub.add_parser("research", help="Feature tables and research-question runs")
@@ -154,7 +161,19 @@ def main(argv: list[str] | None = None) -> None:
         print(json.dumps(perf.layout_report(), indent=2, default=str))
         return
     if args.command == "fingerprints":
-        print(json.dumps(pipelines.fingerprints(), indent=2, sort_keys=True))
+        print(json.dumps(pipelines.fingerprints(season=args.season), indent=2, sort_keys=True))
+        return
+    if args.command == "copy":
+        from pitwall.config import get_settings
+
+        copied = pipelines.copy_tables(
+            args.source,
+            args.target or get_settings().lakehouse_root,
+            tuple(args.layer or ["bronze"]),
+            args.season,
+            tuple(args.exclude),
+        )
+        print(json.dumps(copied, indent=2, sort_keys=True))
         return
 
     if args.command == "ingest" and args.source == "jolpica":
