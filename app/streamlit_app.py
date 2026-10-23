@@ -253,7 +253,9 @@ with findings_tab:
             )
         st.image(str(serving.REPORTS / "rq1" / "forest_plot.png"))
     if "rq2" in found:
-        d = found["rq2"]["primary"]["dml"]
+        # Primary design is the pit-cycle comparison (research plan §6).
+        rq2 = found["rq2"].get("cycle", found["rq2"])
+        d = rq2["primary"]["dml"]
         st.subheader("RQ2 · Does the undercut work?")
         st.metric(
             "Effect of pitting first on P(ahead after both stop), DML",

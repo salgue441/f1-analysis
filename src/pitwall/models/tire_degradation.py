@@ -5,10 +5,13 @@ lap_time_s, tyre_life_laps, compound, fuel_proxy, track_temp_c, in_traffic,
 circuit_id, driver_id, race_id.
 
 Model (lap time centred on the race median):
-    y = race_offset[race] + driver_offset[driver] + fuel_effect * fuel
-        + (beta[circuit, compound] + gamma_temp * temp_std) * tyre_life
+    y = race_offset[race] + driver_offset[driver] + alpha[circuit, compound]
+        + fuel_effect * fuel
+        + (beta[circuit, compound] + driver_deg[driver] + gamma_temp * temp_std) * tyre_life
         + delta_traffic * in_traffic + StudentT noise
-with beta[c, k] = beta_compound[k] + circuit_sigma * z[c, k] (non-centred partial pooling).
+with beta[c, k] = beta_compound[k] + circuit_sigma * z[c, k] (non-centred partial pooling)
+and alpha[c, k] the fresh-tyre pace of compound k at circuit c, pooled the same way and
+summing to zero over compounds (the overall level belongs to the race offset).
 
 Forecasting a new stint only needs the *shape* terms (fuel, tyre, temperature, traffic):
 race and driver offsets are constant within a stint, so they cancel when the forecast is
@@ -31,6 +34,9 @@ if TYPE_CHECKING:
 
 SHAPE_VARS = [
     "fuel_effect",
+    "alpha_compound",
+    "alpha_circuit_sigma",
+    "alpha",
     "beta_compound",
     "circuit_sigma",
     "beta",
@@ -107,12 +113,25 @@ def build_model(
         driver_deg_sigma = pm.HalfNormal("driver_deg_sigma", 0.02)
         z_driver = pm.Normal("z_driver_deg", 0.0, 1.0, dims="driver")
         driver_deg = pm.Deterministic("driver_deg", driver_deg_sigma * z_driver, dims="driver")
+        # Fresh-tyre pace by compound (s): soft is quicker when new, hard slower. Zero-sum over
+        # compounds, since the overall level is the race offset's.
+        alpha_compound = pm.ZeroSumNormal("alpha_compound", sigma=1.0, dims="compound")
+        alpha_circuit_sigma = pm.HalfNormal("alpha_circuit_sigma", 0.5)
+        z_alpha = pm.ZeroSumNormal(
+            "z_alpha", sigma=1.0, dims=("circuit", "compound"), n_zerosum_axes=1
+        )
+        alpha = pm.Deterministic(
+            "alpha",
+            alpha_compound[None, :] + alpha_circuit_sigma * z_alpha,
+            dims=("circuit", "compound"),
+        )
         gamma_temp = pm.Normal("gamma_temp", 0.0, 0.02)
         delta_traffic = pm.Normal("delta_traffic", 0.3, 0.3)
 
         mu = (
             race_offset[race_idx]
             + driver_offset[driver_idx]
+            + alpha[circuit_idx, compound_idx]
             + fuel_effect * fuel
             + (beta[circuit_idx, compound_idx] + driver_deg[driver_idx] + gamma_temp * temp) * tyre
             + delta_traffic * traffic
@@ -259,7 +278,11 @@ def degradation_table(draws: dict, interval: float = 0.9) -> pd.DataFrame:
 
 
 def export_posterior(draws: dict) -> pd.DataFrame:
-    """Long table of degradation draws for the RQ3 simulator: circuit x compound x draw."""
+    """Long table of posterior draws for the RQ3 simulator: circuit x compound x draw.
+
+    `compound_offset_s` is the fresh-tyre pace of the compound at that circuit relative to
+    the circuit's compound average (negative = faster).
+    """
     n = draws["beta"].shape[0]
     frames = []
     for i, circuit in enumerate(draws["circuits"]):
@@ -271,6 +294,7 @@ def export_posterior(draws: dict) -> pd.DataFrame:
                         "compound": compound,
                         "draw": np.arange(n),
                         "beta_s_per_lap": draws["beta"][:, i, j],
+                        "compound_offset_s": draws["alpha"][:, i, j],
                         "fuel_effect_s_per_lap": draws["fuel_effect"],
                     }
                 )
@@ -320,3 +344,16 @@ def hypothesis_tests(draws: dict) -> dict[str, float]:
         (draws["circuit_sigma"] > draws["driver_deg_sigma"]).mean()
     )
     return out
+
+
+def pace_offset_table(draws: dict, interval: float = 0.9) -> pd.DataFrame:
+    """Fresh-tyre pace by compound (s, relative to the compound average): overall."""
+    lo, hi = (1 - interval) / 2, 1 - (1 - interval) / 2
+    a = draws["alpha_compound"]
+    return pd.DataFrame(
+        [
+            (k, a[:, j].mean(), np.quantile(a[:, j], lo), np.quantile(a[:, j], hi))
+            for j, k in enumerate(draws["compounds"])
+        ],
+        columns=["compound", "mean", "lo", "hi"],
+    )

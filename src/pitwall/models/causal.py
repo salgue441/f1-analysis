@@ -46,9 +46,12 @@ class Estimate:
         return asdict(self)
 
 
-def design_matrix(df: pd.DataFrame) -> pd.DataFrame:
-    """Numeric covariates (median-imputed) + one-hot categoricals. Pre-decision only."""
-    x = df[NUMERIC].astype(float)
+def design_matrix(df: pd.DataFrame, extra: list[str] | None = None) -> pd.DataFrame:
+    """Numeric covariates (median-imputed) + one-hot categoricals. Pre-decision only.
+
+    `extra` adds numeric columns for robustness checks (e.g. the recent gap trend).
+    """
+    x = df[NUMERIC + (extra or [])].astype(float)
     x = x.fillna(x.median())
     cats = pd.get_dummies(df[CATEGORICAL].fillna("NA").astype(str), drop_first=True, dtype=float)
     return pd.concat([x, cats], axis=1)
@@ -96,7 +99,12 @@ def _regressor(seed: int):
 
 
 def cross_fit(
-    df: pd.DataFrame, outcome: str, folds: int = 5, seed: int = 0, cluster: str = "race_id"
+    df: pd.DataFrame,
+    outcome: str,
+    folds: int = 5,
+    seed: int = 0,
+    cluster: str = "race_id",
+    extra: list[str] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Out-of-fold nuisances: propensity e(x) = P(T=1|X) and outcome g(x) = E[Y|X].
 
@@ -104,7 +112,7 @@ def cross_fit(
     """
     from sklearn.model_selection import GroupKFold
 
-    x = design_matrix(df).to_numpy()
+    x = design_matrix(df, extra).to_numpy()
     t, y = df["treated"].to_numpy(int), df[outcome].to_numpy(float)
     groups = df[cluster].to_numpy()
     e_hat, g_hat = np.empty(len(df)), np.empty(len(df))

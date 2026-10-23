@@ -163,6 +163,7 @@ def run_rq1(
         )
         results["bayes"] = evaluation.score_draws(y, pred)
         results["hypotheses"] = td.hypothesis_tests(post)
+        results["pace_offset"] = td.pace_offset_table(post).set_index("compound").to_dict("index")
         results["global"] = {
             name: {
                 "mean": float(post[name].mean()),
@@ -356,6 +357,11 @@ def _rq2_analysis(df: pd.DataFrame, seed: int, n_boot: int, n_perm: int) -> dict
     e3, g3 = causal.cross_fit(pl, placebo, seed=seed)
     res["placebo_gap_gain_before_s"] = causal.dml(pl, placebo, e3, g3).as_dict()
     res["permuted_treatment"] = causal.permuted_treatment_refuter(df, primary, n_perm, seed)
+    # Robustness: the gap trend over the last three laps is known at decision time, and a
+    # non-null placebo means recent pace differs between arms. Control for it explicitly.
+    trend = pl.rename(columns={placebo: "recent_gap_trend_s"})
+    e4, g4 = causal.cross_fit(trend, primary, seed=seed, extra=["recent_gap_trend_s"])
+    res["dml_with_recent_gap_trend"] = causal.dml(trend, primary, e4, g4).as_dict()
 
     weights = causal.ipw_weights(df["treated"].to_numpy(), e_hat)
     smd_before = causal.smd(df[keep])
@@ -486,19 +492,35 @@ def sc_events_per_race() -> pd.DataFrame:
     )
 
 
-def load_race_inputs(season: int) -> list:
+def load_race_inputs(season: int, pace: Any = None, cache: dict | None = None) -> list:
+    """Race set-ups for `season`. `cache` reuses the season-independent reads across calls."""
     from pitwall.features.race_sim_params import build_race_inputs
 
-    sessions = _read("gold", "dim_session").filter(F.col("session_type") == "R").toPandas()
-    results = _read("gold", "fact_session_result").filter(F.col("season") == season).toPandas()
+    cache = {} if cache is None else cache
+    if not cache:
+        cache["sessions"] = (
+            _read("gold", "dim_session").filter(F.col("session_type") == "R").toPandas()
+        )
+        # All seasons: earlier ones feed the retirement hazard.
+        cache["results"] = _read("gold", "fact_session_result").toPandas()
+        cache["pit_losses"] = pit_loss_per_stop()
+        cache["sc_events"] = sc_events_per_race()
+        cache["posterior"] = _read("features", "rq1_degradation_posterior").toPandas()
+    sessions, results = cache["sessions"], cache["results"]
     stints = (
         _read("gold", "fact_stint")
         .filter((F.col("season") == season) & (F.col("session_type") == "R"))
         .toPandas()
     )
-    posterior = _read("features", "rq1_degradation_posterior").toPandas()
     return build_race_inputs(
-        season, sessions, results, stints, pit_loss_per_stop(), sc_events_per_race(), posterior
+        season,
+        sessions,
+        results,
+        stints,
+        cache["pit_losses"],
+        cache["sc_events"],
+        cache["posterior"],
+        pace,
     )
 
 
@@ -572,6 +594,77 @@ def _bootstrap_ci(values: np.ndarray, rng: np.random.Generator, n: int = 2000) -
     return [float(np.quantile(means, 0.025)), float(np.quantile(means, 0.975))]
 
 
+# Pace settings tried on the season before the test season (pace scale x race-pace noise).
+PACE_GRID = [(scale, noise) for scale in (0.5, 0.75, 1.0) for noise in (0.1, 0.25, 0.4)]
+
+
+def _backtest(inputs: list, counts: pd.DataFrame, rng: np.random.Generator) -> tuple:
+    """Score simulated finishing distributions against results, vs finish = grid."""
+    from pitwall.simulation import distributed as dist
+    from pitwall.simulation import scoring
+
+    per_race, pits, p10, hit10, pwin, won, grid1, rps_model, rps_grid = ([] for _ in range(9))
+    for ri in inputs:
+        n = len(ri.driver_ids)
+        probs = dist.position_probs(counts, ri.setup.race_id, n)
+        grid_rank = np.argsort(np.argsort(np.where(ri.grid > 0, ri.grid, 99))) + 1
+        r_m = scoring.rps(probs, ri.actual_finish)
+        r_g = scoring.rps(scoring.degenerate(grid_rank, n), ri.actual_finish)
+        rps_model.append(r_m)
+        rps_grid.append(r_g)
+        pits.append(scoring.randomized_pit(probs, ri.actual_finish, rng))
+        p10.append(probs[:, :10].sum(axis=1))
+        hit10.append(ri.actual_finish <= 10)
+        pwin.append(probs[:, 0])
+        won.append(ri.actual_finish == 1)
+        grid1.append(grid_rank == 1)
+        per_race.append(
+            {
+                "race_id": ri.setup.race_id,
+                "circuit_id": ri.circuit_id,
+                "rps_model": float(r_m.mean()),
+                "rps_grid": float(r_g.mean()),
+            }
+        )
+    race_gain = np.array([r["rps_grid"] - r["rps_model"] for r in per_race])
+    rel = scoring.reliability(np.concatenate(p10), np.concatenate(hit10))
+    p_win, y_win = np.concatenate(pwin), np.concatenate(won).astype(float)
+    summary = {
+        "rps_model": float(np.concatenate(rps_model).mean()),
+        "rps_grid_baseline": float(np.concatenate(rps_grid).mean()),
+        "rps_improvement_per_race_mean": float(race_gain.mean()),
+        "rps_improvement_ci": _bootstrap_ci(race_gain, rng),
+        "share_races_model_better": float((race_gain > 0).mean()),
+        "top10_ece": scoring.expected_calibration_error(rel),
+        "win_brier": float(np.mean((p_win - y_win) ** 2)),
+        "win_brier_grid": float(np.mean((np.concatenate(grid1) - y_win) ** 2)),
+        "per_race": per_race,
+    }
+    return summary, rel, np.concatenate(pits)
+
+
+def tune_pace(season: int, n_sims: int = 2000, seed: int = 0, cache: dict | None = None):
+    """Backtest `season` for every PACE_GRID setting; the caller picks the lowest RPS."""
+    from pitwall.features.race_sim_params import PaceSettings
+    from pitwall.simulation import distributed as dist
+
+    spark = get_spark()
+    rows = []
+    for scale, noise in PACE_GRID:
+        inputs = load_race_inputs(season, PaceSettings(scale, noise), cache)
+        counts = dist.simulate_on_spark(spark, [ri.setup for ri in inputs], n_sims, seed=seed)
+        summary, _, _ = _backtest(inputs, counts, np.random.default_rng(seed))
+        rows.append(
+            {
+                "pace_scale": scale,
+                "pace_noise_sd_s": noise,
+                "rps_model": summary["rps_model"],
+                "top10_ece": summary["top10_ece"],
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def run_rq3(
     season: int = 2025,
     backtest_sims: int = 10_000,
@@ -580,20 +673,26 @@ def run_rq3(
     million_run: bool = True,
     seed: int = 42,
 ) -> dict[str, Any]:
-    """Research plan §RQ3: backtest, decision analysis, scaling benchmark."""
+    """Research plan §RQ3: tuning on season-1, backtest, decision analysis, scaling."""
     import time
 
     import mlflow
 
+    from pitwall.features.race_sim_params import PaceSettings
     from pitwall.simulation import distributed as dist
-    from pitwall.simulation import scoring
     from pitwall.simulation.strategies import candidate_strategies
     from pitwall.tracking import tracked_run
 
     out = REPORTS / "rq3"
     out.mkdir(parents=True, exist_ok=True)
     spark = get_spark()
-    inputs = load_race_inputs(season)
+    cache: dict = {}
+    tuning = tune_pace(season - 1, seed=seed, cache=cache)
+    tuning.to_csv(out / "pace_tuning.csv", index=False, float_format="%.4f")
+    best = tuning.loc[tuning["rps_model"].idxmin()]
+    pace = PaceSettings(float(best["pace_scale"]), float(best["pace_noise_sd_s"]))
+
+    inputs = load_race_inputs(season, pace, cache)
     save_race_inputs(inputs, season)
     races = [ri.setup for ri in inputs]
     params = {
@@ -601,6 +700,9 @@ def run_rq3(
         "n_races": len(races),
         "backtest_sims": backtest_sims,
         "decision_sims": decision_sims,
+        "pace_scale": pace.pace_scale,
+        "pace_noise_sd_s": pace.pace_noise_sd_s,
+        "dnf_hazard_per_lap": races[0].params.dnf_hazard_per_lap,
     }
     tables = {
         t: table_path(layer, t)  # type: ignore[arg-type]
@@ -614,47 +716,11 @@ def run_rq3(
     rng = np.random.default_rng(seed)
     with tracked_run("rq3-strategy", params, tables, seed) as run:
         res: dict[str, Any] = {"mlflow_run_id": run.info.run_id, **params}
+        res["pace_tuning"] = {"season": season - 1, "grid": tuning.round(4).to_dict("records")}
 
         # Backtest: simulate every race with the strategies actually run, score vs grid.
         counts = dist.simulate_on_spark(spark, races, backtest_sims, seed=seed)
-        per_race, pits, p10, hit10, pwin, won, grid1 = [], [], [], [], [], [], []
-        rps_model, rps_grid = [], []
-        for ri in inputs:
-            n = len(ri.driver_ids)
-            probs = dist.position_probs(counts, ri.setup.race_id, n)
-            grid_rank = np.argsort(np.argsort(np.where(ri.grid > 0, ri.grid, 99))) + 1
-            r_m = scoring.rps(probs, ri.actual_finish)
-            r_g = scoring.rps(scoring.degenerate(grid_rank, n), ri.actual_finish)
-            rps_model.append(r_m)
-            rps_grid.append(r_g)
-            pits.append(scoring.randomized_pit(probs, ri.actual_finish, rng))
-            p10.append(probs[:, :10].sum(axis=1))
-            hit10.append(ri.actual_finish <= 10)
-            pwin.append(probs[:, 0])
-            won.append(ri.actual_finish == 1)
-            grid1.append(grid_rank == 1)
-            per_race.append(
-                {
-                    "race_id": ri.setup.race_id,
-                    "circuit_id": ri.circuit_id,
-                    "rps_model": float(r_m.mean()),
-                    "rps_grid": float(r_g.mean()),
-                }
-            )
-        race_gain = np.array([r["rps_grid"] - r["rps_model"] for r in per_race])
-        rel = scoring.reliability(np.concatenate(p10), np.concatenate(hit10))
-        p_win, y_win = np.concatenate(pwin), np.concatenate(won).astype(float)
-        res["backtest"] = {
-            "rps_model": float(np.concatenate(rps_model).mean()),
-            "rps_grid_baseline": float(np.concatenate(rps_grid).mean()),
-            "rps_improvement_per_race_mean": float(race_gain.mean()),
-            "rps_improvement_ci": _bootstrap_ci(race_gain, rng),
-            "share_races_model_better": float((race_gain > 0).mean()),
-            "top10_ece": scoring.expected_calibration_error(rel),
-            "win_brier": float(np.mean((p_win - y_win) ** 2)),
-            "win_brier_grid": float(np.mean((np.concatenate(grid1) - y_win) ** 2)),
-            "per_race": per_race,
-        }
+        res["backtest"], rel, pits = _backtest(inputs, counts, rng)
         rel.to_csv(out / "top10_reliability.csv", index=False)
 
         # Decision analysis: best alternative per driver, chosen on split 0, scored on split 1.
@@ -672,13 +738,13 @@ def run_rq3(
             seed=seed + 1,
         )
         choose, score = dist.summarize(sums, split=0), dist.summarize(sums, split=1)
-        best = (
+        chosen = (
             choose[~choose["is_actual"]]
             .sort_values("expected_points", ascending=False)
             .groupby(["race_id", "car_index"])
             .head(1)[["race_id", "car_index", "strategy"]]
         )
-        held = best.merge(score, on=["race_id", "car_index", "strategy"])
+        held = chosen.merge(score, on=["race_id", "car_index", "strategy"])
         actual_pts = score[score["is_actual"]][["race_id", "car_index", "expected_points"]]
         held = held.merge(
             actual_pts.rename(columns={"expected_points": "actual_points"}),
@@ -695,6 +761,7 @@ def run_rq3(
             "n_candidates_per_race_mean": float(np.mean([len(c) for c in candidates.values()])),
             "n_driver_races": len(held),
             "mean_gain_per_driver_race": float(gain.mean()),
+            "median_gain_per_driver_race": float(gain.median()),
             "mean_gain_ci": _bootstrap_ci(by_race, rng),
             "share_gain_below_0_5_pts": float((gain < 0.5).mean()),
             "share_gain_over_2_se": float((gain > 2 * held["points_gain_se"]).mean()),
@@ -733,7 +800,7 @@ def run_rq3(
                 "cores": cores,
                 "p_win_top3": {inputs[0].driver_ids[i]: float(probs[i, 0]) for i in top},
             }
-        _plot_rq3(rel, np.concatenate(pits), scaling, gain, out)
+        _plot_rq3(rel, pits, scaling, gain, out)
 
         mlflow.log_metrics({k: v for k, v in res["backtest"].items() if isinstance(v, float)})
         mlflow.log_metrics({k: v for k, v in res["decision"].items() if isinstance(v, float)})

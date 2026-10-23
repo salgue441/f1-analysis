@@ -19,6 +19,10 @@ class Truth:
     beta_compound: dict[str, float] = field(
         default_factory=lambda: {"SOFT": 0.09, "MEDIUM": 0.05, "HARD": 0.025}
     )
+    # Fresh-tyre pace (s), zero-sum over compounds like the model's.
+    alpha_compound: dict[str, float] = field(
+        default_factory=lambda: {"SOFT": -0.5, "MEDIUM": 0.0, "HARD": 0.5}
+    )
     circuit_sigma: float = 0.02
     driver_deg_sigma: float = 0.005
     fuel_effect: float = 0.035
@@ -69,6 +73,7 @@ def simulate_laps(
                         mu = (
                             race_pace
                             + driver_pace[d]
+                            + truth.alpha_compound[compound]
                             + truth.fuel_effect * fuel
                             + (
                                 beta[(c, compound)]
