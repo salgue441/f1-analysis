@@ -57,6 +57,20 @@ def main(argv: list[str] | None = None) -> None:
 
     sub.add_parser("fingerprints", help="Row counts + checksums of silver and gold tables")
 
+    rq = sub.add_parser("research", help="Feature tables and research-question runs")
+    rq_sub = rq.add_subparsers(dest="target", required=True)
+    feat = rq_sub.add_parser("features", help="Build a feature table for seasons")
+    feat.add_argument("table", choices=["rq1"])
+    feat.add_argument("--season", type=int, action="append", required=True)
+    rq1 = rq_sub.add_parser("rq1", help="Tire degradation: baselines, PyMC model, checks")
+    rq1.add_argument("--train", type=int, nargs="+", default=[2023, 2024])
+    rq1.add_argument("--test", type=int, default=2025)
+    rq1.add_argument("--draws", type=int, default=1000)
+    rq1.add_argument("--tune", type=int, default=1000)
+    rq1.add_argument("--chains", type=int, default=4)
+    rq1.add_argument("--seed", type=int, default=42)
+    rq1.add_argument("--no-sensitivity", action="store_true")
+
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
@@ -66,6 +80,24 @@ def main(argv: list[str] | None = None) -> None:
             pipelines.run_season_laps(
                 args.season, ingest=not args.no_ingest, telemetry=args.telemetry
             )
+        return
+    if args.command == "research":
+        from pitwall import research
+
+        if args.target == "features":
+            build = research.build_feat_rq1
+            print({s: build(s) for s in args.season})
+        elif args.target == "rq1":
+            results = research.run_rq1(
+                args.train,
+                args.test,
+                draws=args.draws,
+                tune=args.tune,
+                chains=args.chains,
+                seed=args.seed,
+                sensitivity=not args.no_sensitivity,
+            )
+            print(json.dumps({k: results[k] for k in ("b0", "b1", "bayes")}, indent=2))
         return
     if args.command == "maintain":
         print(json.dumps(pipelines.maintain(), indent=2))
