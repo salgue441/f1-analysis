@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from delta.tables import DeltaTable
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
@@ -29,17 +30,20 @@ REPORTS = Path(__file__).resolve().parents[2] / "reports"
 QUERIES: dict[tuple[str, str], str] = {
     ("silver", "laps"): "season = 2024 AND event_round = 12 AND driver_number = 16",
     ("gold", "fact_lap"): "season = 2024 AND event_round = 12 AND driver_id = 'leclerc'",
+    ("silver", "telemetry_car"): "season = 2024 AND event_round = 12 AND driver_number = 16",
+    ("gold", "fact_telemetry_sample"): "season = 2024 AND event_round = 12 AND driver_number = 16",
 }
 
 
 def _probe(df: DataFrame, condition: str, repeats: int = 5) -> dict[str, Any]:
     selected = df.filter(condition)
     files = selected.select(F.input_file_name().alias("f")).distinct().count()
-    selected.agg(F.sum("lap_time_s")).collect()  # warm-up
+    measure = "lap_time_s" if "lap_time_s" in df.columns else "speed_kmh"
+    selected.agg(F.sum(measure)).collect()  # warm-up
     times = []
     for _ in range(repeats):
         start = time.perf_counter()
-        selected.agg(F.sum("lap_time_s")).collect()
+        selected.agg(F.sum(measure)).collect()
         times.append(time.perf_counter() - start)
     return {"files_read": files, "query_s_median": round(statistics.median(times), 3)}
 
@@ -49,6 +53,8 @@ def layout_report() -> dict[str, Any]:
     out: dict[str, Any] = {}
     for (layer, table), condition in QUERIES.items():
         path = table_path(layer, table)  # type: ignore[arg-type]
+        if not DeltaTable.isDeltaTable(spark, path):
+            continue
         before = {
             **maintenance.table_detail(spark, path),
             **_probe(spark.read.format("delta").load(path), condition),
