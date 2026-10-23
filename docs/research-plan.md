@@ -11,7 +11,7 @@ This document is written **before** modeling, in the spirit of a pre-registratio
 | **Question** | How much lap time does each compound lose per lap of tire age, and how does that vary by circuit and track temperature? |
 | **Hypotheses** | H1a: degradation (s/lap) is ordered SOFT > MEDIUM > HARD at most circuits. H1b: degradation increases with track temperature. H1c: circuits vary more than drivers do. |
 | **Estimand** | β_c,k = expected change in fuel-corrected lap time per extra lap of tire age, for compound *k* at circuit *c* (green-flag, clean-air laps). |
-| **Data** | `feat_tire_degradation`, 2018–2024 train, 2025 test. |
+| **Data** | `feat_tire_degradation`, 2023–2024 train, 2025 test (lap data starts in 2023; see §6). |
 | **Model** | Bayesian hierarchical regression (PyMC): `lap_time ~ race_offset + driver_offset + fuel_effect_c · fuel_proxy + (β_k + β_c,k) · tyre_life + γ · track_temp · tyre_life + δ · in_traffic`, with partial pooling of β_c,k across circuits and a Student-t likelihood (robust to outliers). Non-linear "cliff" handled by a stretch extension (piecewise/spline in tyre_life). |
 | **Baselines** | (B0) per-stint OLS slope averaged by compound; (B1) LightGBM on the same features. |
 | **Evaluation** | Predict the lap times of held-out 2025 stints given their first 3 laps: RMSE/MAE vs baselines; **90% interval coverage**; posterior predictive checks; R-hat < 1.01, ESS > 400, no divergences. |
@@ -56,7 +56,7 @@ This document is written **before** modeling, in the spirit of a pre-registratio
 
 - **Temporal validation only.** Train ≤ season Y−1, test on season Y; rolling-origin backtests within a season where needed. Never random splits.
 - **Leakage controls.** Point-in-time feature builders, tested. No post-decision information in RQ2 covariates.
-- **Regulation eras.** 2022 brought major car regulation changes. Include `era` as a factor and check that results hold within the 2022+ era alone.
+- **Regulation eras.** 2022 brought major car regulation changes. All lap-level data (2023–2025) falls inside the 2022+ era, so era effects can't be estimated and no cross-era claims are made (see §6).
 - **Uncertainty everywhere.** Posterior intervals, cluster-robust CIs, simulation distributions. No bare point estimates in the reports.
 - **Baselines first.** Each RQ reports its baseline before the main model.
 - **Tracking.** Every fit is an MLflow run with git SHA, Delta table versions, seed and config.
@@ -84,4 +84,4 @@ Each RQ gets `reports/rqN_<name>.md` (rendered from a notebook) with: question �
 
 | Date | RQ | Change | Reason |
 |---|---|---|---|
-| | | | |
+| 2026-10-22 | RQ1–RQ3 | Lap-level data window narrowed from 2018–2025 to **2023–2025**. RQ1 trains on 2023–2024 and tests on 2025; RQ2 and RQ3 use the same window. Jolpica results stay 2018+ for dimensions and history. The planned within-era check is dropped as moot. | The FastF1 timing archive needs an F1 TV login since Oct 2026. OpenF1 is free but starts in 2023 ([ADR-0006](adr/0006-openf1-as-lap-data-source.md)). Decided before any modeling. |
