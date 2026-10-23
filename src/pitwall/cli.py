@@ -116,7 +116,7 @@ def main(argv: list[str] | None = None) -> None:
             print(json.dumps({k: results[k] for k in ("b0", "b1", "bayes")}, indent=2))
         elif args.target == "rq2":
             results = research.run_rq2(args.seasons, seed=args.seed)
-            print(json.dumps(results["primary"], indent=2, default=str))
+            print(json.dumps(results["cycle"]["primary"], indent=2, default=str))
         elif args.target == "eda":
             print(json.dumps(research.run_eda(args.seasons), indent=2, default=str))
         elif args.target == "rq3":

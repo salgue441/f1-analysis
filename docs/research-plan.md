@@ -24,7 +24,7 @@ This document is written **before** modeling, in the spirit of a pre-registratio
 |---|---|
 | **Question** | When two cars are fighting (gap < 3 s), does pitting first *cause* the car behind to end up ahead after both have pitted? |
 | **Estimand** | ATE (and CATE by circuit degradation tier) of *pitting first at lap t* on P(ahead of rival after the pit cycle). |
-| **Unit** | Driver–rival pair × lap within a pit window, from `feat_pit_decision`. |
+| **Unit** | Driver–rival pair in a shared pit cycle, from `feat_pit_cycle` (primary); pair × lap from `feat_pit_decision` (secondary). See §6. |
 | **Identification** | Selection on observables: pitting decisions depend on gap, tire age/compound, laps remaining, degradation, expected rejoin traffic, all of which are observed at lap *t*. Draw the assumed DAG in the report. |
 | **Methods** | (1) Naive difference (to show the bias); (2) inverse propensity weighting with overlap trimming; (3) **double ML** (EconML `LinearDML` / `CausalForestDML`) with cross-fitting; check that the methods agree. |
 | **Diagnostics** | Propensity overlap plots, covariate balance (SMD < 0.1), cluster-robust CIs by race. |
@@ -85,3 +85,5 @@ Each RQ gets `reports/rqN_<name>.md` (rendered from a notebook) with: question �
 | Date | RQ | Change | Reason |
 |---|---|---|---|
 | 2026-10-22 | RQ1–RQ3 | Lap-level data window narrowed from 2018–2025 to **2023–2025**. RQ1 trains on 2023–2024 and tests on 2025; RQ2 and RQ3 use the same window. Jolpica results stay 2018+ for dimensions and history. The planned within-era check is dropped as moot. | The FastF1 timing archive needs an F1 TV login since Oct 2026. OpenF1 is free but starts in 2023 ([ADR-0006](adr/0006-openf1-as-lap-data-source.md)). Decided before any modeling. |
+| 2026-10-23 | RQ2 | **Primary design changed** from the lap-level risk set (pit on lap t vs not, rival hasn't pitted) to a **pit-cycle comparison**: pairs within 3 s whose next stops are both within 8 laps; treated = the car behind stops first, control = the rival stops first. The lap-level design is kept and reported as secondary. Same outcome, covariates, SC exclusion and robustness checks. | A smoke run on 2024 only showed the lap-level design has almost no overlap: pitting on any given lap is rare (2.6% of units), so most propensities fall below the 0.05 trimming bound and the estimates are unstable. Changed before running on the full 2023–2025 data. |
+| 2026-10-23 | RQ1 | Predictive intervals for held-out stints now include lap noise on the anchor laps as well as the target laps. | A smoke run showed under-coverage (84% for a 90% interval). Leaving out anchor noise understates level uncertainty; the baselines' empirical intervals already include it, so the comparison was unfair. Fixed before the final run. |

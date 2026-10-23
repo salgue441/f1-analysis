@@ -255,8 +255,16 @@ def circuit_deg_tiers() -> pd.DataFrame:
     return tiers.rename("deg_tier").reset_index()
 
 
-def build_feat_rq2(season: int) -> int:
-    from pitwall.features.pit_decision import build_feat_pit_decision, circuit_pit_loss
+RQ2_TABLES = {"cycle": "feat_pit_cycle", "lap": "feat_pit_decision"}
+
+
+def build_feat_rq2(season: int) -> dict[str, int]:
+    """Both RQ2 designs: feat_pit_cycle (primary) and feat_pit_decision (lap-level)."""
+    from pitwall.features.pit_decision import (
+        build_feat_pit_cycle,
+        build_feat_pit_decision,
+        circuit_pit_loss,
+    )
 
     spark = get_spark()
     in_season = F.col("season") == season
@@ -264,19 +272,20 @@ def build_feat_rq2(season: int) -> int:
     try:
         tiers = spark.createDataFrame(circuit_deg_tiers())
     except Exception:  # noqa: BLE001 - RQ1 not run yet: no heterogeneity tier
-        log.warning("No RQ1 posterior found; feat_pit_decision.deg_tier will be NULL")
+        log.warning("No RQ1 posterior found; deg_tier will be NULL")
         tiers = None
-    feat = build_feat_pit_decision(
-        _read("gold", "fact_lap").filter(in_season),
-        sessions.filter(in_season),
-        circuit_pit_loss(_read("gold", "fact_pit_stop"), sessions),
-        tiers,
-    )
-    overwrite_season(spark, feat, table_path("features", "feat_pit_decision"), season)
-    return _read("features", "feat_pit_decision").filter(in_season).count()
+    laps = _read("gold", "fact_lap").filter(in_season)
+    loss = circuit_pit_loss(_read("gold", "fact_pit_stop"), sessions)
+    counts = {}
+    for design, build in [("cycle", build_feat_pit_cycle), ("lap", build_feat_pit_decision)]:
+        feat = build(laps, sessions.filter(in_season), loss, tiers)
+        path = table_path("features", RQ2_TABLES[design])
+        overwrite_season(spark, feat, path, season)
+        counts[design] = _read("features", RQ2_TABLES[design]).filter(in_season).count()
+    return counts
 
 
-def _propensity_plot(t: np.ndarray, e_hat: np.ndarray, path: Path) -> None:
+def _propensity_plot(t: np.ndarray, e_hat: np.ndarray, path: Path, labels: tuple) -> None:
     import matplotlib
 
     matplotlib.use("Agg")
@@ -284,13 +293,12 @@ def _propensity_plot(t: np.ndarray, e_hat: np.ndarray, path: Path) -> None:
 
     fig, ax = plt.subplots(figsize=(7, 3.4))
     bins = np.linspace(0, 1, 41)
-    ax.hist(e_hat[t == 0], bins=bins, alpha=0.6, density=True, label="did not pit (control)")
-    ax.hist(e_hat[t == 1], bins=bins, alpha=0.6, density=True, label="pitted first (treated)")
+    ax.hist(e_hat[t == 0], bins=bins, alpha=0.6, density=True, label=labels[0])
+    ax.hist(e_hat[t == 1], bins=bins, alpha=0.6, density=True, label=labels[1])
     for x in (0.05, 0.95):
         ax.axvline(x, color="black", lw=0.7, ls="--")
-    ax.set_yscale("log")
-    ax.set_xlabel("Estimated propensity to pit this lap (cross-fitted)")
-    ax.set_ylabel("density (log)")
+    ax.set_xlabel("Estimated propensity (cross-fitted by race)")
+    ax.set_ylabel("density")
     ax.legend(frameon=False)
     fig.tight_layout()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -298,91 +306,117 @@ def _propensity_plot(t: np.ndarray, e_hat: np.ndarray, path: Path) -> None:
     plt.close(fig)
 
 
-def run_rq2(seasons: list[int], seed: int = 42, n_boot: int = 500, n_perm: int = 20) -> dict:
-    """Research plan §RQ2 end to end. Writes reports/rq2/* and an MLflow run."""
-    import mlflow
-
+def _rq2_analysis(df: pd.DataFrame, seed: int, n_boot: int, n_perm: int) -> dict[str, Any]:
+    """All estimators, diagnostics and refutations for one design's units."""
     from pitwall.models import causal
-    from pitwall.tracking import tracked_run
 
-    out = REPORTS / "rq2"
-    df = _read("features", "feat_pit_decision").filter(F.col("season").isin(seasons)).toPandas()
     primary, secondary, placebo = (
         "outcome_ahead_after_cycle",
         "outcome_gap_gain_s",
         "placebo_gap_gain_before_s",
     )
-    params = {
-        "seasons": ",".join(map(str, seasons)),
+    res: dict[str, Any] = {
         "n_units": len(df),
         "n_treated": int(df["treated"].sum()),
-        "n_races": df["race_id"].nunique(),
+        "n_races": int(df["race_id"].nunique()),
+        "p_ahead_treated_raw": float(df.loc[df["treated"] == 1, primary].mean()),
+        "p_ahead_control_raw": float(df.loc[df["treated"] == 0, primary].mean()),
     }
-    tables = {"feat_pit_decision": table_path("features", "feat_pit_decision")}
+    e_hat, g_hat = causal.cross_fit(df, primary, seed=seed)
+    keep = causal.overlap_mask(e_hat)
+    res["overlap"] = {
+        "share_kept": float(keep.mean()),
+        "treated_kept": int(df["treated"].to_numpy()[keep].sum()),
+        "control_kept": int((1 - df["treated"].to_numpy())[keep].sum()),
+    }
+    res["primary"] = {
+        "naive": causal.naive(df, primary).as_dict(),
+        "ipw": causal.ipw(df, primary, e_hat, n_boot=n_boot, seed=seed).as_dict(),
+        "dml": causal.dml(df, primary, e_hat, g_hat).as_dict(),
+        "econml_linear_dml": causal.econml_cross_check(df[keep], primary, seed),
+    }
+    rr = causal.risk_ratio(df, primary, e_hat)
+    p0 = float(df.loc[keep & (df["treated"] == 0).to_numpy(), primary].mean())
+    dml_est = res["primary"]["dml"]
+    # E-value for the CI bound closest to the null (VanderWeele & Ding).
+    bound = dml_est["lo"] if dml_est["effect"] > 0 else dml_est["hi"]
+    crosses_null = dml_est["lo"] <= 0 <= dml_est["hi"]
+    res["sensitivity"] = {
+        "risk_ratio": rr,
+        "e_value": causal.e_value(rr),
+        "e_value_ci": 1.0 if crosses_null else causal.e_value((p0 + bound) / p0),
+    }
+
+    sec = df.dropna(subset=[secondary])
+    e2, g2 = causal.cross_fit(sec, secondary, seed=seed)
+    res["secondary_gap_gain_s"] = causal.dml(sec, secondary, e2, g2).as_dict()
+    pl = df.dropna(subset=[placebo])
+    e3, g3 = causal.cross_fit(pl, placebo, seed=seed)
+    res["placebo_gap_gain_before_s"] = causal.dml(pl, placebo, e3, g3).as_dict()
+    res["permuted_treatment"] = causal.permuted_treatment_refuter(df, primary, n_perm, seed)
+
+    weights = causal.ipw_weights(df["treated"].to_numpy(), e_hat)
+    smd_before = causal.smd(df[keep])
+    smd_after = causal.smd(df[keep], weights[keep])
+    res["balance"] = {
+        "max_abs_smd_before": float(smd_before.abs().max()),
+        "max_abs_smd_after": float(smd_after.abs().max()),
+        "share_covariates_balanced_after": float((smd_after.abs() < 0.1).mean()),
+        "smd_before": smd_before.round(3).to_dict(),
+        "smd_after": smd_after.round(3).to_dict(),
+    }
+    res["by_deg_tier"] = {}
+    for tier in sorted(df["deg_tier"].dropna().unique()):
+        mask = (df["deg_tier"] == tier).to_numpy()
+        n_t = int(df.loc[mask, "treated"].sum())
+        if n_t >= 20 and mask.sum() - n_t >= 20:
+            res["by_deg_tier"][tier] = causal.dml(
+                df[mask], primary, e_hat[mask], g_hat[mask]
+            ).as_dict()
+    res["_e_hat"] = e_hat
+    return res
+
+
+def run_rq2(seasons: list[int], seed: int = 42, n_boot: int = 500, n_perm: int = 20) -> dict:
+    """Research plan §RQ2 end to end, both designs. Writes reports/rq2/* and an MLflow run."""
+    import mlflow
+
+    from pitwall.tracking import tracked_run
+
+    out = REPORTS / "rq2"
+    frames = {
+        design: _read("features", table)
+        .filter(F.col("season").isin(seasons))
+        .toPandas()
+        .dropna(subset=["outcome_ahead_after_cycle"])
+        .reset_index(drop=True)
+        for design, table in RQ2_TABLES.items()
+    }
+    params = {
+        "seasons": ",".join(map(str, seasons)),
+        **{f"n_units_{d}": len(f) for d, f in frames.items()},
+    }
+    tables = {t: table_path("features", t) for t in RQ2_TABLES.values()}
     with tracked_run("rq2-undercut", params, tables, seed) as run:
-        res: dict[str, Any] = {"mlflow_run_id": run.info.run_id, **params}
-        e_hat, g_hat = causal.cross_fit(df, primary, seed=seed)
-        keep = causal.overlap_mask(e_hat)
-        res["overlap"] = {
-            "share_kept": float(keep.mean()),
-            "treated_kept": int(df["treated"].to_numpy()[keep].sum()),
-        }
-        res["primary"] = {
-            "naive": causal.naive(df, primary).as_dict(),
-            "ipw": causal.ipw(df, primary, e_hat, n_boot=n_boot, seed=seed).as_dict(),
-            "dml": causal.dml(df, primary, e_hat, g_hat).as_dict(),
-            "econml_linear_dml": causal.econml_cross_check(df[keep], primary, seed),
-        }
-        rr = causal.risk_ratio(df, primary, e_hat)
-        res["primary"]["risk_ratio"] = rr
-        res["primary"]["e_value"] = causal.e_value(rr)
-        # E-value for the CI bound closest to the null (VanderWeele & Ding).
-        p0 = float(df.loc[keep & (df["treated"] == 0).to_numpy(), primary].mean())
-        dml_lo = res["primary"]["dml"]["lo"]
-        res["primary"]["e_value_ci"] = causal.e_value((p0 + dml_lo) / p0) if dml_lo > 0 else 1.0
-
-        e2, g2 = causal.cross_fit(df.dropna(subset=[secondary]), secondary, seed=seed)
-        res["secondary_gap_gain_s"] = causal.dml(
-            df.dropna(subset=[secondary]), secondary, e2, g2
-        ).as_dict()
-        pl = df.dropna(subset=[placebo])
-        e3, g3 = causal.cross_fit(pl, placebo, seed=seed)
-        res["placebo_gap_gain_before_s"] = causal.dml(pl, placebo, e3, g3).as_dict()
-        res["permuted_treatment"] = causal.permuted_treatment_refuter(df, primary, n_perm, seed)
-
-        weights = causal.ipw_weights(df["treated"].to_numpy(), e_hat)
-        smd_before = causal.smd(df[keep])
-        smd_after = causal.smd(df[keep], weights[keep])
-        res["balance"] = {
-            "max_abs_smd_before": float(smd_before.abs().max()),
-            "max_abs_smd_after": float(smd_after.abs().max()),
-            "smd_after": smd_after.round(3).to_dict(),
-            "smd_before": smd_before.round(3).to_dict(),
-        }
-
-        res["by_deg_tier"] = {}
-        for tier in sorted(df["deg_tier"].dropna().unique()):
-            mask = (df["deg_tier"] == tier).to_numpy()
-            if df.loc[mask, "treated"].sum() >= 20:
-                res["by_deg_tier"][tier] = causal.dml(
-                    df[mask], primary, e_hat[mask], g_hat[mask]
-                ).as_dict()
-        _propensity_plot(df["treated"].to_numpy(), e_hat, out / "propensity_overlap.png")
-
-        flat = {
-            f"{m}_{k}": v
-            for m, est in res["primary"].items()
-            if isinstance(est, dict)
-            for k, v in est.items()
-            if isinstance(v, (int, float))
-        }
-        mlflow.log_metrics(flat)
-        mlflow.log_metrics(
-            {
-                "e_value": res["primary"]["e_value"],
-                **{f"balance_{k}": v for k, v in res["balance"].items() if isinstance(v, float)},
-            }
-        )
+        res: dict[str, Any] = {"mlflow_run_id": run.info.run_id, "seasons": seasons}
+        for design, df in frames.items():
+            analysis = _rq2_analysis(df, seed, n_boot, n_perm)
+            e_hat = analysis.pop("_e_hat")
+            labels = (
+                ("rival stopped first", "stopped first (undercut)")
+                if design == "cycle"
+                else ("did not pit that lap", "pitted that lap")
+            )
+            _propensity_plot(
+                df["treated"].to_numpy(), e_hat, out / f"propensity_overlap_{design}.png", labels
+            )
+            res[design] = analysis
+            for method in ("naive", "ipw", "dml"):
+                est = analysis["primary"][method]
+                mlflow.log_metrics(
+                    {f"{design}_{method}_{k}": est[k] for k in ("effect", "lo", "hi")}
+                )
+            mlflow.log_metrics({f"{design}_{k}": v for k, v in analysis["sensitivity"].items()})
         mlflow.log_artifacts(str(out), "rq2")
         _write_json(out / "results.json", res)
     return res

@@ -17,9 +17,14 @@ from typing import Any
 from pitwall.config import get_settings
 
 
+def _mlflow_dir() -> Path:
+    return Path(get_settings().lakehouse_root).parent / "mlflow"
+
+
 def tracking_uri() -> str:
-    default = Path(get_settings().lakehouse_root).parent / "mlflow" / "mlruns"
-    return os.environ.get("MLFLOW_TRACKING_URI", default.as_uri())
+    """The compose MLflow server when set, else the same SQLite store it serves from."""
+    default = f"sqlite:///{_mlflow_dir() / 'mlflow.db'}"
+    return os.environ.get("MLFLOW_TRACKING_URI", default)
 
 
 def git_state() -> dict[str, str]:
@@ -54,7 +59,12 @@ def tracked_run(
     import mlflow
 
     mlflow.set_tracking_uri(tracking_uri())
-    mlflow.set_experiment(f"{get_settings().mlflow.experiment_prefix}-{experiment}")
+    name = f"{get_settings().mlflow.experiment_prefix}-{experiment}"
+    if mlflow.get_experiment_by_name(name) is None:
+        artifacts = _mlflow_dir() / "artifacts"
+        artifacts.mkdir(parents=True, exist_ok=True)
+        mlflow.create_experiment(name, artifact_location=artifacts.as_uri())
+    mlflow.set_experiment(name)
     with mlflow.start_run() as run:
         mlflow.set_tags({**git_state(), "seed": str(seed)})
         mlflow.log_params({**params, "seed": seed})
