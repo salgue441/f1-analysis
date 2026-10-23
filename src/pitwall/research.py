@@ -240,3 +240,149 @@ def _rq1_sensitivity(train: pd.DataFrame, seed: int, **fit_kw: int) -> dict[str,
         out[f"traffic_gap_{gap}s"] = summary(df)
     out["fuel_prior_wide"] = summary(train, fuel_prior=(0.04, 0.06))
     return out
+
+
+# --- RQ2 -------------------------------------------------------------------------------------
+
+
+def circuit_deg_tiers() -> pd.DataFrame:
+    """Circuit degradation tier (low/mid/high tertile) from the RQ1 posterior mean slope of
+    the race compounds (MEDIUM, HARD), as a circuit attribute for RQ2 heterogeneity."""
+    post = _read("features", "rq1_degradation_posterior").toPandas()
+    race = post[post["compound"].isin(["MEDIUM", "HARD"])]
+    mean = race.groupby("circuit_id")["beta_s_per_lap"].mean()
+    tiers = pd.qcut(mean, 3, labels=["low", "mid", "high"]).astype(str)
+    return tiers.rename("deg_tier").reset_index()
+
+
+def build_feat_rq2(season: int) -> int:
+    from pitwall.features.pit_decision import build_feat_pit_decision, circuit_pit_loss
+
+    spark = get_spark()
+    in_season = F.col("season") == season
+    sessions = _read("gold", "dim_session")
+    try:
+        tiers = spark.createDataFrame(circuit_deg_tiers())
+    except Exception:  # noqa: BLE001 - RQ1 not run yet: no heterogeneity tier
+        log.warning("No RQ1 posterior found; feat_pit_decision.deg_tier will be NULL")
+        tiers = None
+    feat = build_feat_pit_decision(
+        _read("gold", "fact_lap").filter(in_season),
+        sessions.filter(in_season),
+        circuit_pit_loss(_read("gold", "fact_pit_stop"), sessions),
+        tiers,
+    )
+    overwrite_season(spark, feat, table_path("features", "feat_pit_decision"), season)
+    return _read("features", "feat_pit_decision").filter(in_season).count()
+
+
+def _propensity_plot(t: np.ndarray, e_hat: np.ndarray, path: Path) -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(7, 3.4))
+    bins = np.linspace(0, 1, 41)
+    ax.hist(e_hat[t == 0], bins=bins, alpha=0.6, density=True, label="did not pit (control)")
+    ax.hist(e_hat[t == 1], bins=bins, alpha=0.6, density=True, label="pitted first (treated)")
+    for x in (0.05, 0.95):
+        ax.axvline(x, color="black", lw=0.7, ls="--")
+    ax.set_yscale("log")
+    ax.set_xlabel("Estimated propensity to pit this lap (cross-fitted)")
+    ax.set_ylabel("density (log)")
+    ax.legend(frameon=False)
+    fig.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+
+
+def run_rq2(seasons: list[int], seed: int = 42, n_boot: int = 500, n_perm: int = 20) -> dict:
+    """Research plan §RQ2 end to end. Writes reports/rq2/* and an MLflow run."""
+    import mlflow
+
+    from pitwall.models import causal
+    from pitwall.tracking import tracked_run
+
+    out = REPORTS / "rq2"
+    df = _read("features", "feat_pit_decision").filter(F.col("season").isin(seasons)).toPandas()
+    primary, secondary, placebo = (
+        "outcome_ahead_after_cycle",
+        "outcome_gap_gain_s",
+        "placebo_gap_gain_before_s",
+    )
+    params = {
+        "seasons": ",".join(map(str, seasons)),
+        "n_units": len(df),
+        "n_treated": int(df["treated"].sum()),
+        "n_races": df["race_id"].nunique(),
+    }
+    tables = {"feat_pit_decision": table_path("features", "feat_pit_decision")}
+    with tracked_run("rq2-undercut", params, tables, seed) as run:
+        res: dict[str, Any] = {"mlflow_run_id": run.info.run_id, **params}
+        e_hat, g_hat = causal.cross_fit(df, primary, seed=seed)
+        keep = causal.overlap_mask(e_hat)
+        res["overlap"] = {
+            "share_kept": float(keep.mean()),
+            "treated_kept": int(df["treated"].to_numpy()[keep].sum()),
+        }
+        res["primary"] = {
+            "naive": causal.naive(df, primary).as_dict(),
+            "ipw": causal.ipw(df, primary, e_hat, n_boot=n_boot, seed=seed).as_dict(),
+            "dml": causal.dml(df, primary, e_hat, g_hat).as_dict(),
+            "econml_linear_dml": causal.econml_cross_check(df[keep], primary, seed),
+        }
+        rr = causal.risk_ratio(df, primary, e_hat)
+        res["primary"]["risk_ratio"] = rr
+        res["primary"]["e_value"] = causal.e_value(rr)
+        # E-value for the CI bound closest to the null (VanderWeele & Ding).
+        p0 = float(df.loc[keep & (df["treated"] == 0).to_numpy(), primary].mean())
+        dml_lo = res["primary"]["dml"]["lo"]
+        res["primary"]["e_value_ci"] = causal.e_value((p0 + dml_lo) / p0) if dml_lo > 0 else 1.0
+
+        e2, g2 = causal.cross_fit(df.dropna(subset=[secondary]), secondary, seed=seed)
+        res["secondary_gap_gain_s"] = causal.dml(
+            df.dropna(subset=[secondary]), secondary, e2, g2
+        ).as_dict()
+        pl = df.dropna(subset=[placebo])
+        e3, g3 = causal.cross_fit(pl, placebo, seed=seed)
+        res["placebo_gap_gain_before_s"] = causal.dml(pl, placebo, e3, g3).as_dict()
+        res["permuted_treatment"] = causal.permuted_treatment_refuter(df, primary, n_perm, seed)
+
+        weights = causal.ipw_weights(df["treated"].to_numpy(), e_hat)
+        smd_before = causal.smd(df[keep])
+        smd_after = causal.smd(df[keep], weights[keep])
+        res["balance"] = {
+            "max_abs_smd_before": float(smd_before.abs().max()),
+            "max_abs_smd_after": float(smd_after.abs().max()),
+            "smd_after": smd_after.round(3).to_dict(),
+            "smd_before": smd_before.round(3).to_dict(),
+        }
+
+        res["by_deg_tier"] = {}
+        for tier in sorted(df["deg_tier"].dropna().unique()):
+            mask = (df["deg_tier"] == tier).to_numpy()
+            if df.loc[mask, "treated"].sum() >= 20:
+                res["by_deg_tier"][tier] = causal.dml(
+                    df[mask], primary, e_hat[mask], g_hat[mask]
+                ).as_dict()
+        _propensity_plot(df["treated"].to_numpy(), e_hat, out / "propensity_overlap.png")
+
+        flat = {
+            f"{m}_{k}": v
+            for m, est in res["primary"].items()
+            if isinstance(est, dict)
+            for k, v in est.items()
+            if isinstance(v, (int, float))
+        }
+        mlflow.log_metrics(flat)
+        mlflow.log_metrics(
+            {
+                "e_value": res["primary"]["e_value"],
+                **{f"balance_{k}": v for k, v in res["balance"].items() if isinstance(v, float)},
+            }
+        )
+        mlflow.log_artifacts(str(out), "rq2")
+        _write_json(out / "results.json", res)
+    return res
