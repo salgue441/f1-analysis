@@ -21,6 +21,7 @@ from pitwall.ingestion import fastf1_loader
 from pitwall.ingestion.jolpica import ENDPOINTS, JolpicaClient
 from pitwall.paths import Layer, table_path
 from pitwall.quality import QualityReport, apply_expectations
+from pitwall.quality.log import append_report
 from pitwall.silver.merge import append_quarantine, merge_into_delta
 from pitwall.silver.registry import SPECS, target_table
 from pitwall.spark import get_spark
@@ -100,6 +101,7 @@ def build_silver(name: str, season: int) -> QualityReport:
     )
     if report.quarantined_rows:
         append_quarantine(quarantined, table_path("quarantine", target))
+    append_report(spark, table_path("quarantine", "_dq_runs"), name, season, report)
     log.info("silver.%s (%s) season=%s: %s", target, name, season, report)
     return report
 
@@ -162,3 +164,66 @@ def build_fact_session_result(season: int) -> int:
     )
     overwrite_season(get_spark(), fact, table_path("gold", "fact_session_result"), season)
     return _read("gold", "fact_session_result").filter(in_season).count()
+
+
+# --- end-to-end runs -------------------------------------------------------------------------
+
+SILVER_FROM_JOLPICA = [
+    "races",
+    "circuits",
+    "drivers",
+    "constructors",
+    "results",
+    "sprint_results",
+    "qualifying",
+]
+
+
+def run_season(season: int, ingest: bool = True) -> None:
+    """The Phase 1 graph for one season without Dagster (same steps, same order)."""
+    if ingest:
+        for endpoint in SEASON_ENDPOINTS:
+            ingest_jolpica(season, endpoint)
+    for name in SILVER_FROM_JOLPICA:
+        build_silver(name, season)
+    if ingest:
+        for round_ in season_rounds(season):
+            ingest_jolpica(season, "pitstops", round_)
+    build_silver("pit_stops", season)
+    build_gold_dims()
+    build_fact_session_result(season)
+
+
+# Columns that legitimately differ between identical rebuilds.
+VOLATILE_COLUMNS = {"_ingested_at", "_updated_at", "_quarantined_at", "run_at"}
+
+
+def table_fingerprint(df: DataFrame) -> dict[str, int]:
+    """Row count + order-independent checksum of the non-volatile columns."""
+    cols = sorted(c for c in df.columns if c not in VOLATILE_COLUMNS)
+    row = df.agg(
+        F.count(F.lit(1)).alias("rows"),
+        F.sum(F.xxhash64(*cols).cast("decimal(38,0)")).cast("string").alias("checksum"),
+    ).first()
+    return {"rows": row["rows"], "checksum": row["checksum"]}
+
+
+def fingerprints(layers: tuple[Layer, ...] = ("silver", "gold")) -> dict[str, dict[str, int]]:
+    """Fingerprint every Delta table in the given layers (for rebuild-twice checks)."""
+    from delta.tables import DeltaTable
+
+    spark = get_spark()
+    root = get_settings().lakehouse_root
+    jvm_path = spark._jvm.org.apache.hadoop.fs.Path(root)  # type: ignore[union-attr]
+    fs = jvm_path.getFileSystem(spark._jsc.hadoopConfiguration())  # type: ignore[union-attr]
+    out = {}
+    for layer in layers:
+        layer_path = spark._jvm.org.apache.hadoop.fs.Path(f"{root}/{layer}")  # type: ignore[union-attr]
+        if not fs.exists(layer_path):
+            continue
+        for status in fs.listStatus(layer_path):
+            path = status.getPath().toString()
+            if DeltaTable.isDeltaTable(spark, path):
+                name = f"{layer}.{status.getPath().getName()}"
+                out[name] = table_fingerprint(spark.read.format("delta").load(path))
+    return out
