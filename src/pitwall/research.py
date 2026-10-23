@@ -466,6 +466,21 @@ def load_race_inputs(season: int) -> list:
     )
 
 
+def save_race_inputs(inputs: list, season: int) -> dict[str, int]:
+    """features.feat_race_sim_params (race grain) + feat_race_sim_cars (car grain)."""
+    from pitwall.features.race_sim_params import to_tables
+
+    spark = get_spark()
+    races, cars = to_tables(inputs, season)
+    for name, pdf in [("feat_race_sim_params", races), ("feat_race_sim_cars", cars)]:
+        overwrite_season(spark, spark.createDataFrame(pdf), table_path("features", name), season)
+    return {"races": len(races), "cars": len(cars)}
+
+
+def build_feat_rq3(season: int) -> dict[str, int]:
+    return save_race_inputs(load_race_inputs(season), season)
+
+
 def _plot_rq3(
     reliability: pd.DataFrame, pit: np.ndarray, scaling: pd.DataFrame, gains: pd.Series, out: Path
 ) -> None:
@@ -543,6 +558,7 @@ def run_rq3(
     out.mkdir(parents=True, exist_ok=True)
     spark = get_spark()
     inputs = load_race_inputs(season)
+    save_race_inputs(inputs, season)
     races = [ri.setup for ri in inputs]
     params = {
         "season": season,

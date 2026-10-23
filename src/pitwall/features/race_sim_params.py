@@ -23,6 +23,7 @@ import pandas as pd
 
 from pitwall.simulation.distributed import RaceSetup
 from pitwall.simulation.field import Car, FieldParams
+from pitwall.simulation.race_simulator import Stint, Strategy
 from pitwall.simulation.strategies import strategy_from_stints
 
 DEFAULT_SC_HAZARD = 0.02
@@ -137,3 +138,67 @@ def build_race_inputs(
             )
         )
     return out
+
+
+def to_tables(inputs: list[RaceInputs], season: int) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Persistable form: one row per race (scalars) and one per car (grid, pace, strategy).
+
+    Degradation draws are not copied: readers join the RQ1 posterior by circuit.
+    """
+    races, cars = [], []
+    for ri in inputs:
+        p = ri.setup.params
+        races.append(
+            {
+                "season": season,
+                "race_id": ri.setup.race_id,
+                "circuit_id": ri.circuit_id,
+                "race_laps": p.race_laps,
+                "base_lap_s": p.base_lap_s,
+                "pit_loss_mean_s": p.pit_loss_mean_s,
+                "pit_loss_sd_s": p.pit_loss_sd_s,
+                "sc_hazard_per_lap": p.sc_hazard_per_lap,
+            }
+        )
+        for i, car in enumerate(ri.setup.cars):
+            cars.append(
+                {
+                    "season": season,
+                    "race_id": ri.setup.race_id,
+                    "car_index": i,
+                    "driver_id": car.driver_id,
+                    "grid": car.grid,
+                    "pace_offset_s": car.pace_offset_s,
+                    "actual_finish": int(ri.actual_finish[i]),
+                    "strategy": ";".join(f"{s.compound}:{s.laps}" for s in car.strategy.stints),
+                }
+            )
+    return pd.DataFrame(races), pd.DataFrame(cars)
+
+
+def parse_strategy(text: str, name: str = "actual") -> Strategy:
+    """'MEDIUM:20;HARD:37' -> Strategy."""
+    stints = tuple(Stint(c, int(n)) for c, n in (part.split(":") for part in text.split(";")))
+    return Strategy(name, stints)
+
+
+def from_tables(race: pd.Series, cars: pd.DataFrame, posterior: pd.DataFrame) -> RaceSetup:
+    """Rebuild a RaceSetup from the persisted tables (used by the app; no Spark)."""
+    deg, fuel = degradation_draws(posterior, race["circuit_id"])
+    for compound in ("SOFT", "MEDIUM", "HARD"):
+        deg.setdefault(compound, np.full(len(fuel), 0.05))
+    params = FieldParams(
+        race_laps=int(race["race_laps"]),
+        base_lap_s=float(race["base_lap_s"]),
+        deg_draws=deg,
+        fuel_draws=fuel,
+        pit_loss_mean_s=float(race["pit_loss_mean_s"]),
+        pit_loss_sd_s=float(race["pit_loss_sd_s"]),
+        sc_hazard_per_lap=float(race["sc_hazard_per_lap"]),
+    )
+    ordered = cars.sort_values("car_index")
+    field_cars = tuple(
+        Car(r.driver_id, int(r.grid), float(r.pace_offset_s), parse_strategy(r.strategy))
+        for r in ordered.itertuples(index=False)
+    )
+    return RaceSetup(race["race_id"], field_cars, params)
