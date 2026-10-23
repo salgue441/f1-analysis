@@ -73,6 +73,8 @@ def main(argv: list[str] | None = None) -> None:
     rq2 = rq_sub.add_parser("rq2", help="Undercut: naive, IPW, DML, diagnostics, refutations")
     rq2.add_argument("--seasons", type=int, nargs="+", default=[2023, 2024, 2025])
     rq2.add_argument("--seed", type=int, default=42)
+    eda = rq_sub.add_parser("eda", help="Coverage audit and distributions -> reports/eda")
+    eda.add_argument("--seasons", type=int, nargs="+", default=[2023, 2024, 2025])
     rq3 = rq_sub.add_parser("rq3", help="Strategy simulator: backtest, decisions, scaling")
     rq3.add_argument("--season", type=int, default=2025)
     rq3.add_argument("--backtest-sims", type=int, default=10_000)
@@ -115,6 +117,8 @@ def main(argv: list[str] | None = None) -> None:
         elif args.target == "rq2":
             results = research.run_rq2(args.seasons, seed=args.seed)
             print(json.dumps(results["primary"], indent=2, default=str))
+        elif args.target == "eda":
+            print(json.dumps(research.run_eda(args.seasons), indent=2, default=str))
         elif args.target == "rq3":
             results = research.run_rq3(
                 args.season,

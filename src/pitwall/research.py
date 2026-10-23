@@ -704,3 +704,119 @@ def run_rq3(
         mlflow.log_artifacts(str(out), "rq3")
         _write_json(out / "results.json", res)
     return res
+
+
+# --- EDA (research plan §3) ------------------------------------------------------------------
+
+
+def run_eda(seasons: list[int]) -> dict[str, Any]:
+    """Coverage audit, lap-time and stint distributions, pit-loss sanity check."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from pitwall.gold.lap_facts import clean_lap_flag
+
+    out = REPORTS / "eda"
+    out.mkdir(parents=True, exist_ok=True)
+    in_seasons = F.col("season").isin(seasons)
+    laps = _read("gold", "fact_lap").filter(in_seasons & (F.col("session_type") == "R"))
+    races = _read("gold", "dim_session").filter(F.col("session_type") == "R")
+
+    coverage = (
+        laps.groupBy("season")
+        .agg(
+            F.countDistinct("event_round").alias("races"),
+            F.count(F.lit(1)).alias("laps"),
+            F.avg(F.col("lap_time_s").isNull().cast("int")).alias("share_no_time"),
+            F.avg(F.col("is_accurate").cast("int")).alias("share_accurate"),
+            F.avg(F.col("is_green_flag").cast("int")).alias("share_green"),
+            F.avg((F.col("compound") == "UNKNOWN").cast("int")).alias("share_unknown_compound"),
+            F.avg(F.col("track_temp_c").isNull().cast("int")).alias("share_no_weather"),
+            F.avg(clean_lap_flag().cast("int")).alias("share_clean"),
+        )
+        .orderBy("season")
+        .toPandas()
+    )
+    scheduled = (
+        races.filter(in_seasons).groupBy("season").agg(F.count(F.lit(1)).alias("races_scheduled"))
+    ).toPandas()
+    coverage = coverage.merge(scheduled, on="season", how="left")
+    coverage.to_csv(out / "coverage.csv", index=False, float_format="%.4f")
+
+    clean = laps.filter(clean_lap_flag() & F.col("compound").isin("SOFT", "MEDIUM", "HARD"))
+    sample = (
+        clean.join(
+            races.select("season", F.col("round").alias("event_round"), "circuit_id"),
+            ["season", "event_round"],
+        )
+        .select("season", "circuit_id", "compound", "lap_time_s", "tyre_life_laps")
+        .toPandas()
+    )
+    sample["rel"] = sample["lap_time_s"] / sample.groupby(["season", "circuit_id"])[
+        "lap_time_s"
+    ].transform("median")
+    fig, axes = plt.subplots(1, 2, figsize=(11, 3.8))
+    for compound, color in [("SOFT", "#d62728"), ("MEDIUM", "#e6b800"), ("HARD", "#7f7f7f")]:
+        part = sample[sample["compound"] == compound]
+        axes[0].hist(
+            part["rel"].clip(0.97, 1.06),
+            bins=80,
+            histtype="step",
+            color=color,
+            label=compound,
+            density=True,
+        )
+        age = part.groupby("tyre_life_laps")["rel"].median()
+        age = age[part.groupby("tyre_life_laps").size() >= 200]
+        axes[1].plot(age.index, age.values, color=color, label=compound)
+    axes[0].set_xlabel("Lap time / race median (clean laps)")
+    axes[0].legend(frameon=False)
+    axes[1].set_xlabel("Tyre age (laps)")
+    axes[1].set_ylabel("Median relative lap time")
+    axes[1].set_title("Raw (fuel burn hides wear: later laps are lighter)")
+    fig.tight_layout()
+    fig.savefig(out / "lap_times_by_compound.png", dpi=150)
+    plt.close(fig)
+
+    stints = _read("gold", "fact_stint").filter(in_seasons & (F.col("session_type") == "R"))
+    strategies = (
+        stints.groupBy("season", "event_round", "driver_id")
+        .agg(
+            F.count(F.lit(1)).alias("stints"),
+            F.sort_array(F.collect_list(F.struct("stint_number", "compound"))).alias("s"),
+        )
+        .withColumn("stops", F.col("stints") - 1)
+        .toPandas()
+    )
+    stops = strategies["stops"].clip(upper=4).value_counts(normalize=True).sort_index()
+    stint_laps = stints.select("compound", "laps").toPandas()
+    stint_len = (
+        stint_laps[stint_laps["compound"].isin(["SOFT", "MEDIUM", "HARD"])]
+        .groupby("compound")["laps"]
+        .describe()[["count", "mean", "50%", "max"]]
+    )
+
+    pit = pit_loss_per_stop()
+    pit = pit[pit["season"].isin(seasons) & pit["pit_loss_s"].between(5, 60)]
+    pit_by_circuit = (
+        pit.groupby("circuit_id")["pit_loss_s"].agg(["median", "count"]).sort_values("median")
+    )
+    pit_by_circuit.to_csv(out / "pit_loss_by_circuit.csv", float_format="%.2f")
+
+    result = {
+        "seasons": seasons,
+        "coverage": coverage.to_dict("records"),
+        "stops_share": {str(k): float(v) for k, v in stops.items()},
+        "stint_laps_by_compound": stint_len.round(2).to_dict("index"),
+        "pit_loss_median_s": float(pit["pit_loss_s"].median()),
+        "pit_loss_iqr_s": [
+            float(pit["pit_loss_s"].quantile(0.25)),
+            float(pit["pit_loss_s"].quantile(0.75)),
+        ],
+        "pit_loss_lowest": pit_by_circuit.head(3)["median"].round(2).to_dict(),
+        "pit_loss_highest": pit_by_circuit.tail(3)["median"].round(2).to_dict(),
+    }
+    _write_json(out / "results.json", result)
+    return result

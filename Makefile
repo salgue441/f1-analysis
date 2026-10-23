@@ -4,7 +4,7 @@ SEASONS ?= 2018 2019 2020 2021 2022 2023 2024 2025
 LAP_SEASONS ?= 2023 2024 2025
 
 .PHONY: help up down cluster shell test test-all lint fmt typecheck lock ingest-results \
-	backfill features rq1 rq2 rq3 research demo maintain dagster jupyter app
+	backfill features eda rq1 rq2 rq3 research demo maintain dagster jupyter app
 
 help:  ## Show targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -61,7 +61,10 @@ rq2:  ## RQ2 undercut (features need the RQ1 posterior) -> reports/rq2
 rq3:  ## RQ3 strategy simulator (backtest, decisions, scaling) -> reports/rq3
 	$(EXEC) pitwall research rq3
 
-research: features rq1 rq2 rq3  ## All research questions in order
+eda:  ## Exploratory analysis (coverage, distributions, pit loss) -> reports/eda
+	$(EXEC) pitwall research eda
+
+research: features eda rq1 rq2 rq3  ## EDA and all research questions in order
 
 demo:  ## Small end-to-end run: 2024 results, two races of laps, quick RQ1 fit
 	$(EXEC) pitwall run 2024
