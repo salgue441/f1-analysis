@@ -188,9 +188,15 @@ with race_tab:
         stints = laps_df.groupby(["driver_id", "stint_number", "compound"], as_index=False).agg(
             start=("lap_number", "min"), end=("lap_number", "max")
         )
+        # Classified order: more laps first (lapped cars and retirements end before the
+        # leader's final lap), then position on each driver's last lap.
         order = (
-            laps_df[laps_df["lap_number"] == laps_df["lap_number"].max()]
-            .sort_values("position_end_of_lap")["driver_id"]
+            laps_df.sort_values("lap_number")
+            .groupby("driver_id")
+            .tail(1)
+            .sort_values(["lap_number", "position_end_of_lap"], ascending=[False, True])[
+                "driver_id"
+            ]
             .tolist()
         )
         fig = go.Figure()
