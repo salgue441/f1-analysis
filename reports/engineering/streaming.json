@@ -1,0 +1,26 @@
+{
+  "batch_processing_s_median": 10.022992245008936,
+  "batch_processing_s_p95": 19.809246046002954,
+  "context": {
+    "deg_s_per_lap": {
+      "HARD": 0.055324329122375615,
+      "MEDIUM": 0.08299155033841703,
+      "SOFT": 0.12944115943043819
+    },
+    "race_laps": 58,
+    "tier": "high",
+    "undercut_effect_pp": 49.52342225506318
+  },
+  "delta_append_s_median": 3.7062987480021548,
+  "events": 2027,
+  "lakehouse_root": "/workspace/data/lakehouse",
+  "landing_files": 239,
+  "latency_s_median": 29.529662,
+  "latency_s_p95": 67.181591,
+  "micro_batches": 21,
+  "round": 24,
+  "season": 2025,
+  "session_key": 9839,
+  "speed": 20.0,
+  "trigger_s": 2.0
+}

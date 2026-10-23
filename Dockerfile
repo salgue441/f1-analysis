@@ -10,7 +10,7 @@ WORKDIR /workspace
 
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN pip install --no-cache-dir -e ".[ds,causal,dev]"
+RUN pip install --no-cache-dir -e ".[ds,causal,live,dev]"
 
 # Expose the pip-installed Spark distribution at a stable path for spark-class.
 RUN ln -s "$(python -c 'import os, pyspark; print(os.path.dirname(pyspark.__file__))')" /opt/spark
