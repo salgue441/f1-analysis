@@ -95,13 +95,9 @@ def build_race_state(events: DataFrame, ctx: StrategyContext) -> DataFrame:
     )
     status = status_events(rc.drop("session_key")).select("start_s", "status")
     labels = F.create_map(*[F.lit(x) for kv in TRACK_STATUS_LABELS.items() for x in kv])
-    current = (
-        status.orderBy(F.col("start_s").desc())
-        .limit(1)
-        .select(labels[F.col("status")].alias("track_status"))
-        .collect()
-    )
-    track_status = F.lit(current[0]["track_status"] if current else "green")
+    # One row (null before any status message), joined in rather than collected: a driver-side
+    # collect would cost a Spark job of its own in every micro-batch.
+    latest_status = status.agg(F.max_by("status", "start_s").alias("_status"))
 
     state = (
         position.join(drivers, car, "left")
@@ -138,7 +134,7 @@ def build_race_state(events: DataFrame, ctx: StrategyContext) -> DataFrame:
     )
     in_tier = F.lit(ctx.tier in UNDERCUT_TIERS)
     window_open = (
-        (track_status == "green")
+        (F.col("track_status") == "green")
         & F.col("gap_ahead_s").between(0, UNDERCUT_GAP_S)
         & (F.col("tyre_age_laps") >= MIN_TYRE_AGE)
         & (F.col("ahead_tyre_age") >= MIN_TYRE_AGE)
@@ -148,9 +144,13 @@ def build_race_state(events: DataFrame, ctx: StrategyContext) -> DataFrame:
     return (
         state.join(ahead, ["session_key", "position"], "left")
         .join(ahead_laps, ["session_key", "ahead_number", "lap_number"], "left")
-        .withColumn("gap_ahead_s", F.round(F.col("lap_end") - F.col("ahead_lap_end"), 3))
+        # Negative when the position feed has already registered a pass that the timing line
+        # hasn't: the gap is undefined until both cars cross again.
+        .withColumn("_gap", F.round(F.col("lap_end") - F.col("ahead_lap_end"), 3))
+        .withColumn("gap_ahead_s", F.when(F.col("_gap") >= 0, F.col("_gap")))
         .withColumn("laps_remaining", F.lit(ctx.race_laps) - leader_lap)
-        .withColumn("track_status", track_status)
+        .crossJoin(F.broadcast(latest_status))
+        .withColumn("track_status", F.coalesce(labels[F.col("_status")], F.lit("green")))
         .withColumn("time_loss_vs_new_s", F.round(deg_rate * F.col("tyre_age_laps"), 3))
         .withColumn("undercut_window", F.coalesce(window_open, F.lit(False)))
         .withColumn(

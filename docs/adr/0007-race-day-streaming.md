@@ -24,5 +24,10 @@ Phase 7 adds a live view of a race: positions, gaps, tyres and strategy signals,
 
 ## Consequences
 - The pipeline is fully exercised without a subscription: `make stream-replay` streams any race in bronze, and tests cover release timing, state logic and exactly-once behaviour end to end.
-- Latency is dominated by Spark's fixed per-batch overhead (several small jobs and three Delta commits). In measurements the median was 7 s from emitted to state written on the container filesystem, and 15 s on a Windows bind mount. That's enough for lap-by-lap strategy calls (laps take about 90 s), not for anything faster.
+- Per-batch cost is fixed overhead, not data volume.
+  - **What it is:** a micro-batch takes about 8 s whether it carries 1 event or 300 (median over three replays of the 2025 Abu Dhabi GP: [`streaming.json`](../../reports/engineering/streaming.json)). About 2 s is the Delta append and most of the rest is the state plan.
+  - **What it isn't:** profiling ruled out shuffle width and adaptive execution; one-row Delta commits alone take over 1 s on Docker Desktop's disk.
+  - **Measured latency:** at 60× replay speed (a whole race in about 90 s), events wait for the previous batch, giving 17–20 s median and about 25 s p95 from emitted to state written.
+  - **Real-time estimate (not measured over a full race):** at real pace there is little queueing, so latency should be about one batch plus one trigger, around 10 s.
+  - That is enough for lap-by-lap strategy calls (laps take about 90 s), not for anything faster. A lower-latency design would keep the state in memory and write Delta less often.
 - The live connector follows OpenF1's documented interface but hasn't been run against a live session. It is the one untested path.

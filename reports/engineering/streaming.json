@@ -1,6 +1,4 @@
 {
-  "batch_processing_s_median": 10.022992245008936,
-  "batch_processing_s_p95": 19.809246046002954,
   "context": {
     "deg_s_per_lap": {
       "HARD": 0.055324329122375615,
@@ -11,16 +9,39 @@
     "tier": "high",
     "undercut_effect_pp": 49.52342225506318
   },
-  "delta_append_s_median": 3.7062987480021548,
-  "events": 2027,
-  "lakehouse_root": "/workspace/data/lakehouse",
-  "landing_files": 239,
-  "latency_s_median": 29.529662,
-  "latency_s_p95": 67.181591,
-  "micro_batches": 21,
   "round": 24,
+  "runs": [
+    {
+      "batch_processing_s_median": 7.9992968310034485,
+      "batch_processing_s_p95": 13.874170158554625,
+      "delta_append_s_median": 2.0281994635006413,
+      "events": 2027,
+      "latency_s_median": 17.862025,
+      "latency_s_p95": 25.37510065,
+      "micro_batches": 14
+    },
+    {
+      "batch_processing_s_median": 8.529317617008928,
+      "batch_processing_s_p95": 13.691620511998188,
+      "delta_append_s_median": 2.155931821995182,
+      "events": 2027,
+      "latency_s_median": 19.554298,
+      "latency_s_p95": 25.435045399999993,
+      "micro_batches": 13
+    },
+    {
+      "batch_processing_s_median": 7.648926877998747,
+      "batch_processing_s_p95": 14.261725861101148,
+      "delta_append_s_median": 2.083592087998113,
+      "events": 2027,
+      "latency_s_median": 17.140757999999998,
+      "latency_s_p95": 24.222654799999997,
+      "micro_batches": 14
+    }
+  ],
   "season": 2025,
   "session_key": 9839,
-  "speed": 20.0,
+  "speed": 60.0,
+  "storage": "container filesystem (Docker Desktop, WSL2)",
   "trigger_s": 2.0
 }

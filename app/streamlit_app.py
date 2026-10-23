@@ -276,7 +276,7 @@ with live_tab:
                 "undercut_window",
                 "undercut_effect_pp",
             ]
-        ]
+        ].astype({"gap_ahead_s": float, "undercut_effect_pp": float})
         st.dataframe(
             board.style.format(
                 {

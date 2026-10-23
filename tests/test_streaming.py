@@ -147,6 +147,19 @@ def test_race_state_tyres_gaps_and_undercut_window(spark):
     assert not bool(ver["undercut_window"])  # nobody ahead
 
 
+def test_gap_is_undefined_after_a_pass_the_timing_line_has_not_seen(spark):
+    passed = _race_payloads()
+    # NOR is shown ahead by the position feed, but still crossed the line 1.5 s behind.
+    passed["position"] += [
+        {"session_key": KEY, "driver_number": 4, "date": _iso(1100), "position": 1},
+        {"session_key": KEY, "driver_number": 1, "date": _iso(1100), "position": 2},
+    ]
+    state = build_race_state(_events_df(spark, passed), CTX).toPandas().set_index("driver")
+    assert state.loc["NOR", "position"] == 1 and state.loc["VER", "position"] == 2
+    assert state["gap_ahead_s"].isna().all()  # no negative gaps
+    assert not state["undercut_window"].any()
+
+
 def test_no_undercut_window_under_safety_car_or_at_low_wear_tracks(spark):
     sc = _race_payloads()
     sc["race_control"].append(

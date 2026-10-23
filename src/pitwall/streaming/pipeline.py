@@ -147,6 +147,7 @@ class BatchProcessor:
         appended = time.perf_counter()
         session_log = self._session_log(spark, events)
         events.unpersist()
+        logged = time.perf_counter()
 
         state = build_race_state(session_log, self.ctx)
         state_path = table_path("stream", "race_state")
@@ -156,6 +157,7 @@ class BatchProcessor:
                 "replaceWhere", f"session_key = {self.session_key}"
             )
         writer.save(state_path)
+        state_written = time.perf_counter()
 
         done = spark.sql("select current_timestamp() as t").first()["t"]  # type: ignore[index]
         latency = (done - stats["first_emitted"]).total_seconds()
@@ -169,6 +171,8 @@ class BatchProcessor:
             "max_latency_s": latency,
             "min_latency_s": (done - stats["last_emitted"]).total_seconds(),
             "append_s": appended - started,
+            "log_s": logged - appended,
+            "state_s": state_written - logged,
             "processing_s": time.perf_counter() - started,
         }
         self._append(spark.createDataFrame([row]), "_batches", batch_id)
