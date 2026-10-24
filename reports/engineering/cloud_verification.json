@@ -1,0 +1,17 @@
+{
+  "bronze_tables_copied": 15,
+  "copy_s": 513.7,
+  "differ": {},
+  "identical": 13,
+  "only_local": [
+    "gold.fact_telemetry_sample",
+    "silver.telemetry_car",
+    "silver.telemetry_pos"
+  ],
+  "only_on_s3": [],
+  "rebuild_s": 585.1,
+  "rows_compared": 62660,
+  "season": 2024,
+  "season_tables_compared": 13,
+  "store": "SeaweedFS S3 API via s3a:// (conf/s3local.yaml)"
+}

@@ -1,0 +1,16 @@
+# S3-compatible object storage, locally: `docker compose --profile s3 up -d` starts SeaweedFS
+# with an S3 API. Same code as AWS, different endpoint. Credentials come from
+# AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (defaults in docker-compose.yml match
+# deploy/s3local/s3.json).
+lakehouse_root: s3a://pitwall/lakehouse
+
+spark:
+  packages:
+    - org.apache.hadoop:hadoop-aws:3.3.4   # matches the Hadoop client inside PySpark 3.5
+  conf:
+    spark.hadoop.fs.s3a.endpoint: http://s3:8333
+    spark.hadoop.fs.s3a.path.style.access: "true"
+    spark.hadoop.fs.s3a.connection.ssl.enabled: "false"
+    spark.hadoop.fs.s3a.aws.credentials.provider: com.amazonaws.auth.EnvironmentVariableCredentialsProvider
+    # Delta's default S3 log store assumes a single writer per table, which holds here
+    # (one pipeline run at a time). Concurrent writers need S3DynamoDBLogStore.

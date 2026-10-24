@@ -67,6 +67,7 @@ The data platform (lakehouse, pipelines, data model) exists **to serve these que
 flowchart LR
     J[Jolpica-F1 API<br/>results, standings, schedule] --> P
     O[OpenF1 API<br/>laps, stints, weather, telemetry 2023+] --> P
+    L[OpenF1 live feed<br/>MQTT, Sponsor tier] -.race day.-> P
     F[FastF1 library<br/>needs F1 TV login since Oct 2026] -.inactive.-> P
     P[[Pitwall platform]] --> W[Write-up / blog]
     P --> A[Streamlit strategy explorer]
@@ -98,6 +99,8 @@ flowchart LR
 | Orchestration | **Dagster** assets (each table = one asset, partitioned by season) | [ADR-0004](adr/0004-dagster-orchestration.md) |
 | Modeling | **PyMC** (Bayesian), **EconML/DoWhy** (causal), **MLflow** tracking | [ADR-0005](adr/0005-modeling-stack.md) |
 | Lap-level source | **OpenF1** (2023+); FastF1 kept as an inactive alternative | [ADR-0006](adr/0006-openf1-as-lap-data-source.md) |
+| Race-day streaming | **Structured Streaming** over landing files (replay or live MQTT producer), exactly-once into `stream.*` Delta tables | [ADR-0007](adr/0007-race-day-streaming.md) |
+| Cloud | Config-only profiles (`s3local`, `s3`, `aws`, `databricks`); EMR Serverless via Terraform, Databricks via Asset Bundle; verified on local S3 | [ADR-0008](adr/0008-cloud-deployment.md) |
 | Validation | Temporal splits by season/race; never random splits | [Research plan §2](research-plan.md#2-cross-cutting-methodology) |
 
 ---
@@ -153,10 +156,11 @@ src/pitwall/
 ├── bronze/              # generic append-only writer (+ ingestion metadata)
 ├── silver/              # per-source transforms, spec registry, MERGE, driver_id_map
 ├── gold/                # dims (incl. SCD2), facts, keys, integrity checks, writers
-├── features/            # one builder per RQ: tire_degradation, pit_decision, race_sim_params
+├── features/            # one builder per RQ: tire_degradation, pit_decision, race_sim_params, prerace
 ├── quality/             # expectations, quarantine, DQ run log
-├── models/              # RQ1 Bayesian model + baselines + evaluation; RQ2 causal estimators
+├── models/              # RQ1 Bayesian model + baselines + evaluation; RQ2 causal estimators; RQ4 pre-race models
 ├── simulation/          # RQ3 field simulator, strategies, scoring, Spark distribution
+├── streaming/           # race day: replay + live producers, landing files, Structured Streaming, race state
 ├── orchestration/       # Dagster assets, jobs, schedules
 ├── pipelines.py         # data-platform I/O wiring (CLI + Dagster share it)
 ├── research.py          # feature builds + end-to-end RQ runs (MLflow, reports/)
@@ -179,13 +183,14 @@ src/pitwall/
 | **Gold** | Business-facing dimensional model | Delta, **overwrite by partition** (`replaceWhere season = …`) | Star schema, surrogate keys | Referential integrity between facts and dims |
 | **Features** | Model-ready tables, one per research question | Delta, overwrite by partition | Documented feature spec per RQ | Point-in-time correct (no future info) |
 | **Quarantine** | Rejected records with reason | Delta, append | Silver schema + `_failed_expectations` | Monitored; counts reported per run |
+| **Stream** | Race-day state ([ADR-0007](adr/0007-race-day-streaming.md)) | Delta: `events` and `_batches` append (idempotent per micro-batch), `race_state` overwrite per session | Raw OpenF1 records; one row per car | Exactly once; rebuilt from the event log |
 
 ### 6.2 Table inventory (initial)
 
 | Bronze | Silver | Gold | Features |
 |---|---|---|---|
 | `jolpica_results`, `jolpica_qualifying`, `jolpica_pitstops`, `jolpica_drivers`, `jolpica_constructors`, `jolpica_circuits`, `jolpica_races` | `results`, `qualifying`, `pit_stops`, `drivers`, `constructors`, `circuits`, `races` | `dim_driver`, `dim_constructor`, `dim_circuit`, `dim_session`, `dim_compound`, `dim_date`, `dim_driver_team` (SCD2) | `feat_tire_degradation` (RQ1), `rq1_degradation_posterior` (RQ1 → RQ3) |
-| `openf1_laps`, `openf1_stints`, `openf1_pit`, `openf1_position`, `openf1_race_control`, `openf1_weather`, `openf1_drivers`, `openf1_car_data`, `openf1_location` (`fastf1_*` inactive) | `laps`, `telemetry_car`, `telemetry_pos`, `weather`, `race_control`, `driver_id_map` | `fact_lap`, `fact_stint`, `fact_pit_stop`, `fact_session_result`, `fact_telemetry_sample` | `feat_pit_cycle` + `feat_pit_decision` (RQ2), `feat_race_sim_params` + `feat_race_sim_cars` (RQ3), `feat_prerace` (RQ4, not built) |
+| `openf1_laps`, `openf1_stints`, `openf1_pit`, `openf1_position`, `openf1_race_control`, `openf1_weather`, `openf1_drivers`, `openf1_car_data`, `openf1_location` (`fastf1_*` inactive) | `laps`, `telemetry_car`, `telemetry_pos`, `weather`, `race_control`, `driver_id_map` | `fact_lap`, `fact_stint`, `fact_pit_stop`, `fact_session_result`, `fact_telemetry_sample` | `feat_pit_cycle` + `feat_pit_decision` (RQ2), `feat_race_sim_params` + `feat_race_sim_cars` (RQ3), `feat_prerace` (RQ4) |
 
 Full schemas, grains and the ERD are in [data-model.md](data-model.md).
 
@@ -239,6 +244,25 @@ Same assets, run for a range of season partitions (`2018…2025`). This works be
 2. Fit the model (single node). Log params, metrics, diagnostics (R-hat, ESS, PPC plots) and the data version (Delta table version) to MLflow.
 3. RQ3: broadcast posterior samples, then distribute `(race, strategy, simulation_batch)` tasks across executors. Aggregate the distribution of finishing positions/points into gold.
 
+### 7.4 Race day (streaming)
+
+```mermaid
+sequenceDiagram
+    participant P as Producer (replay from bronze, or OpenF1 MQTT)
+    participant L as Landing dir (JSON lines)
+    participant Q as Structured Streaming (foreachBatch)
+    participant E as stream.events
+    participant R as stream.race_state
+    participant A as Streamlit (2 s refresh)
+    P->>L: write file, then rename (atomic)
+    Q->>L: new files since checkpoint
+    Q->>E: append records (txnAppId, txnVersion = batch id)
+    Q->>R: rebuild session state from in-memory log, replaceWhere session
+    A->>R: read via delta-rs
+```
+
+The race state reuses `silver.openf1`'s schemas and status coding, and adds the RQ1 wear cost and the RQ2 undercut window per car ([ADR-0007](adr/0007-race-day-streaming.md)).
+
 ---
 
 ## 8. Deployment view
@@ -267,12 +291,12 @@ flowchart LR
 
 | Local | AWS | Azure | Databricks |
 |---|---|---|---|
-| `./data/lakehouse` | S3 | ADLS Gen2 | Unity Catalog volume |
-| Spark standalone | EMR Serverless | Synapse Spark | Jobs compute |
+| `./data/lakehouse` | S3 | ADLS Gen2 | External location (path-based Delta) |
+| Spark standalone | EMR Serverless (custom image) | Synapse Spark | Jobs compute (15.4 LTS) |
 | Dagster local | Dagster+ / MWAA | — | Workflows |
 | MLflow local | SageMaker MLflow | Azure ML | Managed MLflow |
 
-Only `conf/<env>.yaml` changes (`lakehouse_root`, `spark.master`, credentials via environment variables).
+Only `conf/<env>.yaml` changes: `lakehouse_root`, `spark.master` (empty on managed platforms), `spark.delta_pip` (off where the platform ships Delta), `spark.packages` (`hadoop-aws` for `s3a://`). Credentials come from environment variables. Profiles: `s3local` (S3-compatible store in Docker, used to verify), `s3`, `aws`, `databricks`. AWS infrastructure is Terraform in `deploy/aws/`, and Databricks is an Asset Bundle (`databricks.yml`). The runbook is [cloud.md](cloud.md) and the decision is [ADR-0008](adr/0008-cloud-deployment.md).
 
 ---
 

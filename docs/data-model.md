@@ -141,3 +141,28 @@ Degradation and fuel draws are joined from `features.rq1_degradation_posterior` 
 ### `feat_prerace` (RQ4) — grain: driver × race
 
 Grid, qualifying gap to pole, long-run practice pace, rolling form (last N races), circuit history. Only uses information before race start.
+
+### `feat_prerace` (RQ4) — grain: driver × Grand Prix
+
+Only pre-race information; form windows end one race before the current one (tested).
+
+| Column | Definition |
+|---|---|
+| `grid_pos`, `from_pit_lane` | grid after penalties; pit-lane starts placed behind the last slot |
+| `quali_position`, `quali_gap_pct` | qualifying position; gap to pole in %, capped at 7% (107% rule) |
+| `driver_points_l5`, `driver_finish_l5`, `driver_dnf_l10`, `driver_starts` | driver form over the previous 5 races (DNF rate: 10), experience |
+| `team_points_l5`, `team_finish_l5` | team form per car over the previous 5 races; `team` = constructor lineage group |
+| `circuit_pos_change` | mean \|finish − grid\| at the circuit in earlier seasons |
+| `podium`, `scored_points`, `finish_position` | targets |
+
+Partitioned by `season`, 2018–2025.
+
+## Stream tables (race day, [ADR-0007](adr/0007-race-day-streaming.md))
+
+| Table | Grain | Write | Columns |
+|---|---|---|---|
+| `stream.events` | OpenF1 record | append per micro-batch (idempotent) | `session_key`, `endpoint`, `payload` (JSON), `emitted_at`, `stream_batch_id` |
+| `stream.race_state` | car × session | overwrite per session each micro-batch | `position`, `driver`, `team`, `lap_number`, `last_lap_s`, `gap_ahead_s` (at the line, last common lap), `compound`, `stint_number`, `tyre_age_laps`, `pit_stops`, `time_loss_vs_new_s` (RQ1 wear × tyre age), `track_status`, `laps_remaining`, `undercut_window`, `undercut_effect_pp` (RQ2, by wear tier), `last_lap_end_utc` |
+| `stream._batches` | micro-batch | append (idempotent) | `n_events`, first/last `emitted_at`, `state_written_at`, `max_latency_s`, `min_latency_s`, `append_s`, `processing_s` |
+
+All are partitioned by `session_key`.

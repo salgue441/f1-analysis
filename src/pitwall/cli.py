@@ -53,15 +53,38 @@ def main(argv: list[str] | None = None) -> None:
     run.add_argument("--laps", action="store_true", help="Also run the FastF1 lap graph")
     run.add_argument("--telemetry", action="store_true", help="With --laps: include telemetry")
 
+    stream = sub.add_parser("stream", help="Race-day streaming into stream.race_state")
+    stream_sub = stream.add_subparsers(dest="mode", required=True)
+    rep = stream_sub.add_parser("replay", help="Replay a past race from bronze as if live")
+    rep.add_argument("--season", type=int, required=True)
+    rep.add_argument("--round", type=int, required=True)
+    rep.add_argument("--speed", type=float, default=30.0, help="Race seconds per wall second")
+    rep.add_argument("--trigger", type=float, default=2.0, help="Micro-batch interval (s)")
+    live = stream_sub.add_parser(
+        "live", help="OpenF1 live feed (Sponsor tier; OPENF1_USERNAME / OPENF1_PASSWORD)"
+    )
+    live.add_argument("--session-key", type=int, required=True)
+    live.add_argument("--season", type=int, required=True)
+    live.add_argument("--round", type=int, required=True)
+    live.add_argument("--circuit", help="Jolpica circuit id, if the round isn't in dim_session")
+    live.add_argument("--trigger", type=float, default=2.0)
+
     sub.add_parser("maintain", help="OPTIMIZE (+Z-order) and VACUUM every lakehouse table")
 
-    sub.add_parser("fingerprints", help="Row counts + checksums of silver and gold tables")
+    fp = sub.add_parser("fingerprints", help="Row counts + checksums of silver and gold tables")
+    fp.add_argument("--season", type=int, help="Only season-partitioned tables, this season")
+    cp = sub.add_parser("copy", help="Copy Delta tables between lakehouses (e.g. local -> S3)")
+    cp.add_argument("--from", dest="source", required=True, help="Source lakehouse root")
+    cp.add_argument("--to", dest="target", default=None, help="Default: this env's root")
+    cp.add_argument("--layer", action="append", default=None, help="Repeatable; default bronze")
+    cp.add_argument("--season", type=int, action="append", help="Repeatable; default all")
+    cp.add_argument("--exclude", action="append", default=[], help="Table name to skip")
     sub.add_parser("perf", help="Layout before/after OPTIMIZE + skew -> reports/engineering")
 
     rq = sub.add_parser("research", help="Feature tables and research-question runs")
     rq_sub = rq.add_subparsers(dest="target", required=True)
     feat = rq_sub.add_parser("features", help="Build a feature table for seasons")
-    feat.add_argument("table", choices=["rq1", "rq2", "rq3"])
+    feat.add_argument("table", choices=["rq1", "rq2", "rq3", "rq4"])
     feat.add_argument("--season", type=int, action="append", required=True)
     rq1 = rq_sub.add_parser("rq1", help="Tire degradation: baselines, PyMC model, checks")
     rq1.add_argument("--train", type=int, nargs="+", default=[2023, 2024])
@@ -83,6 +106,11 @@ def main(argv: list[str] | None = None) -> None:
     rq3.add_argument("--benchmark-sims", type=int, default=200_000)
     rq3.add_argument("--no-million", action="store_true")
     rq3.add_argument("--seed", type=int, default=42)
+    rq4 = rq_sub.add_parser("rq4", help="Calibrated pre-race P(podium) / P(points)")
+    rq4.add_argument("--eval", type=int, nargs=2, default=[2022, 2025], metavar=("FROM", "TO"))
+    rq4.add_argument("--simulator-sims", type=int, default=10_000)
+    rq4.add_argument("--no-simulator", action="store_true", help="Skip the RQ3 comparison")
+    rq4.add_argument("--seed", type=int, default=42)
 
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -102,6 +130,7 @@ def main(argv: list[str] | None = None) -> None:
                 "rq1": research.build_feat_rq1,
                 "rq2": research.build_feat_rq2,
                 "rq3": research.build_feat_rq3,
+                "rq4": research.build_feat_rq4,
             }[args.table]
             print({s: build(s) for s in args.season})
         elif args.target == "rq1":
@@ -130,6 +159,33 @@ def main(argv: list[str] | None = None) -> None:
                 seed=args.seed,
             )
             print(json.dumps({k: results[k] for k in ("backtest", "decision")}, default=str))
+        elif args.target == "rq4":
+            results = research.run_rq4(
+                (args.eval[0], args.eval[1]),
+                simulator_season=None if args.no_simulator else args.eval[1],
+                simulator_sims=args.simulator_sims,
+                seed=args.seed,
+            )
+            print(json.dumps(results["eval"], indent=2))
+        return
+    if args.command == "stream":
+        import os
+
+        from pitwall.streaming import pipeline as stream_pipeline
+
+        if args.mode == "replay":
+            summary = stream_pipeline.run_replay(
+                args.season, args.round, speed=args.speed, trigger_s=args.trigger
+            )
+        else:
+            user, password = os.environ.get("OPENF1_USERNAME"), os.environ.get("OPENF1_PASSWORD")
+            if not user or not password:
+                parser.error("live mode needs OPENF1_USERNAME and OPENF1_PASSWORD (Sponsor tier)")
+            session = stream_pipeline.StreamSession(
+                args.session_key, args.season, args.round, args.circuit
+            )
+            summary = stream_pipeline.run_live_stream(session, user, password, args.trigger)
+        print(json.dumps(summary, indent=2, default=str))
         return
     if args.command == "maintain":
         print(json.dumps(pipelines.maintain(), indent=2))
@@ -140,7 +196,19 @@ def main(argv: list[str] | None = None) -> None:
         print(json.dumps(perf.layout_report(), indent=2, default=str))
         return
     if args.command == "fingerprints":
-        print(json.dumps(pipelines.fingerprints(), indent=2, sort_keys=True))
+        print(json.dumps(pipelines.fingerprints(season=args.season), indent=2, sort_keys=True))
+        return
+    if args.command == "copy":
+        from pitwall.config import get_settings
+
+        copied = pipelines.copy_tables(
+            args.source,
+            args.target or get_settings().lakehouse_root,
+            tuple(args.layer or ["bronze"]),
+            args.season,
+            tuple(args.exclude),
+        )
+        print(json.dumps(copied, indent=2, sort_keys=True))
         return
 
     if args.command == "ingest" and args.source == "jolpica":

@@ -6,7 +6,7 @@ from typing import Literal
 
 from pitwall.config import get_settings
 
-Layer = Literal["bronze", "silver", "gold", "features", "quarantine"]
+Layer = Literal["bronze", "silver", "gold", "features", "quarantine", "stream"]
 
 
 def table_path(layer: Layer, table: str, lakehouse_root: str | None = None) -> str:

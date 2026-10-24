@@ -13,7 +13,7 @@ Status: ✅ done · 🟡 done with a documented change of scope · ⬜ not start
 | **4. RQ2** | Undercut causal effect | `feat_pit_cycle` / `feat_pit_decision`, DAG, naive vs IPW vs DML, balance, placebo & E-value | Science DoD met; `reports/rq2_undercut.md` | ✅ Primary design changed to pit cycles before the full run (research plan §6). The placebo is not null, and that is reported |
 | **5. RQ3** | Strategy simulator at scale | Simulator core (NumPy), Spark distribution, backtest on 2025, decision analysis, scaling benchmark | Calibrated backtest; benchmark chart | 🟡 Simulator, Spark distribution, 2025 backtest (beats the grid baseline) and scaling benchmark are done, and 10⁶ races run in 20 s. **Calibration isn't met** (ECE 0.09, overconfident), and the decision analysis isn't credible; both are reported as such |
 | **6. Communicate** | Make it visible | Streamlit strategy explorer, README findings section, blog post | App runs from `make app`; post published | ✅ App, README findings, demo GIF and [blog post](blog/f1-strategy-under-uncertainty.md). Cross-posting it to an external blog is up to the author |
-| 7. Stretch | Extra signal | RQ4 calibrated predictions; OpenF1 live streaming (Structured Streaming); cloud run on EMR/Databricks | — | ⬜ |
+| 7. Stretch | Extra signal | RQ4 calibrated predictions; OpenF1 live streaming (Structured Streaming); cloud run on EMR/Databricks | — | 🟡 **RQ4** done ([report](../reports/rq4_calibrated_predictions.md)): calibrated, but no better than the grid. That's a negative result. **Streaming** done in replay mode ([ADR-0007](adr/0007-race-day-streaming.md)); the live MQTT connector is written to OpenF1's documented interface but untested, since live data is a paid tier. **Cloud** is config-ready and verified on local S3 and inside the EMR image ([runbook](cloud.md), [ADR-0008](adr/0008-cloud-deployment.md)); no job has run in a real AWS or Databricks account |
 
 ## What would move the science forward next
 
@@ -22,3 +22,5 @@ Status: ✅ done · 🟡 done with a documented change of scope · ⬜ not start
 3. **RQ2:** a design that models the rival's response (sequential treatment), and team-orders exclusions.
 4. **RQ3:** feed the RQ2 effect into the overtaking model as a calibration target, and tune the remaining simulator constants (overtaking threshold, SC duration) on the validation season.
 5. **Data:** if FastF1 gains F1 TV authentication, re-enable the `fastf1_*` specs to extend lap-level data back to 2018.
+6. **RQ4:** add practice long-run pace from OpenF1 (the information teams use to beat the grid), and a rank model with position-dependent noise so field-wide probabilities are coherent *and* calibrated.
+7. **Streaming:** keep the race state in memory and write Delta less often to get below the ~8 s per-batch floor; run the live connector during a session.

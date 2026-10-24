@@ -1,0 +1,10 @@
+# Local Spark against real AWS S3, e.g. to copy locally ingested bronze to the cloud bucket:
+#   PITWALL_ENV=s3 PITWALL_LAKEHOUSE_ROOT=s3a://<bucket>/lakehouse pitwall copy --from ...
+# Credentials: the standard AWS chain (env vars, ~/.aws profile, SSO).
+lakehouse_root: s3a://pitwall-lakehouse-CHANGE-ME/lakehouse
+
+spark:
+  packages:
+    - org.apache.hadoop:hadoop-aws:3.3.4   # matches the Hadoop client inside PySpark 3.5
+  conf:
+    spark.hadoop.fs.s3a.aws.credentials.provider: com.amazonaws.auth.DefaultAWSCredentialsProviderChain

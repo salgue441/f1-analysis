@@ -17,3 +17,12 @@ conf/local.yaml
 
 # dagster dev scratch instance (left behind if the server is killed)
 .tmp_dagster_home_*/
+
+# Terraform working files
+deploy/aws/terraform/.terraform/
+*.tfstate
+*.tfstate.*
+# Databricks bundle build output
+.databricks/
+dist/
+build/
