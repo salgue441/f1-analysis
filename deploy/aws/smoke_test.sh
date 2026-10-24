@@ -10,6 +10,7 @@ season="${1:-2024}"
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 out="$repo/data/emr_check"
 mkdir -p "$out"
+cd "$repo"
 
 docker run --rm \
   -v "$repo/data/lakehouse:/data/lakehouse:ro" \
@@ -31,16 +32,16 @@ docker run --rm \
     submit fingerprints --season "$0" > /out/fingerprints.txt
   ' "$season"
 
-docker compose -f "$repo/docker-compose.yml" exec -T workbench \
+docker compose exec -T workbench \
   pitwall fingerprints --season "$season" > "$out/local.txt"
 
-docker compose -f "$repo/docker-compose.yml" exec -T workbench python - "$season" <<'EOF'
+docker compose exec -T workbench python - "$season" <<'EOF'
 import json, sys
 from pathlib import Path
 
 def tail_json(path):
     text = Path(path).read_text()
-    return json.loads(text[text.index("{"):])
+    return json.JSONDecoder().raw_decode(text[text.index("{"):])[0]
 
 out = Path("/workspace/data/emr_check")
 emr = tail_json(out / "fingerprints.txt")

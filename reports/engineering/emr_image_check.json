@@ -1,0 +1,10 @@
+{
+  "differ": [],
+  "identical": 6,
+  "image": "deploy/aws/Dockerfile (EMR Serverless emr-7.5.0 base)",
+  "profile": "aws (spark.master empty, delta_pip false, EMR Delta jars)",
+  "rows_compared": 16579743,
+  "season": 2024,
+  "spark": "3.5.2-amzn-1",
+  "tables_compared": 6
+}
