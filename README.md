@@ -41,6 +41,8 @@ FastF1 (inactive)┘                       └─► Quarantine                 
 - **Compute:** PySpark (ETL, features, distributed simulation) + PyMC / scikit-learn / EconML (modeling on feature tables)
 - **Orchestration:** Dagster assets partitioned by season, with weekly maintenance (OPTIMIZE, Z-order, VACUUM)
 - **Quality:** expectations with quarantine and a per-run DQ log; facts checked for unique keys and orphaned foreign keys before every write; rebuilding a season gives bit-identical tables (checked with row counts + checksums)
+- **Race day:** Spark Structured Streaming turns OpenF1 events into a live race state, exactly once. It is fed by a replay of any past race or, on OpenF1's paid tier, the live MQTT feed. Each car carries its RQ1 tyre-wear cost and an RQ2 undercut-window flag ([ADR-0007](docs/adr/0007-race-day-streaming.md))
+- **Cloud:** config-only profiles for S3, EMR Serverless (Terraform) and Databricks (Asset Bundle). A season rebuilt on S3 matches the local lakehouse table for table ([runbook](docs/cloud.md), [ADR-0008](docs/adr/0008-cloud-deployment.md))
 - **Docs:** [Architecture (SAD)](docs/SAD.md) · [Data model / ERD](docs/data-model.md#erd) · [ADRs](docs/adr/) · [Roadmap](docs/roadmap.md)
 
 <details>
@@ -73,13 +75,26 @@ make perf            # layout evidence for the engineering notes
 make dagster         # asset graph at http://localhost:3000
 ```
 
+Race day and cloud:
+
+```bash
+make stream-replay SEASON=2025 ROUND=24   # replay a race through Structured Streaming; watch the app's Live race tab
+make s3-verify SEASON=2024                # rebuild a season on a local S3 store and compare with the local lakehouse
+```
+
+`pitwall stream live` reads OpenF1's live feed during a session (Sponsor tier; set `OPENF1_USERNAME` / `OPENF1_PASSWORD`). AWS and Databricks deployment steps are in [docs/cloud.md](docs/cloud.md).
+
+![Live race board during a replay of the 2025 Abu Dhabi GP](docs/img/live.gif)
+
 ## Repository layout
 
 ```
-conf/            configuration (base + per-environment)
-docs/            SAD, data model, research plan, roadmap, ADRs, blog post, images
+conf/            configuration: base + environment profiles (local, s3local, s3, aws, databricks)
+deploy/          AWS (Terraform, EMR image, job submit), local S3 verification
+docs/            SAD, data model, research plan, roadmap, ADRs, cloud runbook, blog post, images
 src/pitwall/     package: ingestion, bronze, silver, gold, features, quality, models, simulation,
-                 orchestration, research (RQ runs), serving (app reads), tracking (MLflow)
+                 streaming (race day), orchestration, research (RQ runs), serving (app reads),
+                 tracking (MLflow)
 tests/           unit tests (local Spark + Delta), slow model-recovery test
 notebooks/       exploration (outputs stripped)
 reports/         write-ups per research question, figures and result files
@@ -118,6 +133,15 @@ Rebuilds now produce the compacted layout directly, and the weekly Dagster maint
 - **Idempotency:** rebuilding a season from bronze reproduces every silver and gold table bit-for-bit (row count + checksum), checked after two fixes it uncovered: run-order-dependent MERGE and float aggregation order.
 - **Integrity:** facts are checked for unique primary keys and orphaned foreign keys before every write; a fan-out join was caught this way.
 - **Quality:** the worst quarantine rate is 0.42% (2023 laps, mostly implausible lap times from red-flag laps). Every one of the 151 gate runs is logged in `quarantine/_dq_runs`.
+
+**Streaming, measured** ([`streaming.json`](reports/engineering/streaming.json)). The 2025 Abu Dhabi GP was replayed at 60× (2,027 events in about 90 s) three times.
+- **Batch cost is fixed overhead:** each micro-batch takes about 8 s whether it holds 1 event or 300. That's Spark job and Delta commit overhead (a one-row Delta append alone takes over 1 s on Docker Desktop's disk), so wider or narrower shuffles changed nothing.
+- **Latency:** at 60×, events queue behind the previous batch, giving 17–20 s median and about 25 s p95 from emitted to state written. At real-time pace that is about one batch plus a trigger (an estimate, not measured over a full race).
+- **Two fixes found by measuring:** each batch first re-read the whole Delta log, so cost grew with the race; the session log now stays in memory. And reusing Delta's idempotency id across checkpoints silently skipped a fresh run's batches; the id now changes with the checkpoint (regression-tested).
+
+**Object storage, verified without a cloud bill.**
+- **S3:** a season's bronze was copied to an S3-compatible store (SeaweedFS in Docker), and silver and gold were rebuilt through `s3a://`. All 13 season tables (62,660 rows) match the local lakehouse ([`cloud_verification.json`](reports/engineering/cloud_verification.json)).
+- **EMR image:** inside the EMR Serverless image, pitwall runs on EMR's own Spark 3.5.2 and Delta 3.2.1. A season's gold tables, including 16.5M telemetry rows, fingerprint identically ([`emr_image_check.json`](reports/engineering/emr_image_check.json)). This check caught a missing `spark.submit.pyFiles` for Delta's Python API before any job ran in AWS.
 
 ## Data & license
 

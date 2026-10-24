@@ -94,6 +94,18 @@ The science is the point, but it rests on infrastructure that had to be trustwor
 
 ![Dagster asset lineage](../img/dagster_lineage.png)
 
+## Postscript: the stretch goals
+
+Three extras came after the main questions.
+
+**Can you beat the grid before the race?** Not with free data. A boosted model on qualifying pace, driver and team form and circuit history, with isotonic calibration, gives honest probabilities: its podium calibration error is 0.013. But it is no more accurate than a logistic regression on grid position alone (podium Brier 0.074 vs 0.070, 2022–2025, refit before every race). The grid already prices in what qualifying and recent form know.
+
+**Race day.** Spark Structured Streaming turns OpenF1's timing events into a live race board with positions, gaps, tyre age, the RQ1 wear cost and an "undercut window" flag in exactly the situation RQ2 measured. It runs on a replay of any past race and is wired for OpenF1's paid live feed. Measuring it found a subtle exactly-once bug: Delta's idempotency id outlived a reset checkpoint and silently skipped a fresh run's batches.
+
+**Cloud.** Moving to S3, EMR Serverless or Databricks is a config change. A season rebuilt on a local S3 store matches the local lakehouse table for table, and inside the EMR image the code runs on EMR's own Spark and Delta.
+
+![Live race board during a replay](../img/live.gif)
+
 ## What I'd do next
 
 1. **Fix RQ1's intervals.** Add stint-level random wear and autocorrelated lap noise, and a tyre "cliff" term so very long stints stop looking cheap.
